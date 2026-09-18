@@ -365,7 +365,8 @@ end
             end
             S.btOn = logical(get(hBtOn,'value'));
             btList = get(hBtMethod,'string');
-            S.btMethod = {'mean','median','grubbs'}{get(hBtMethod,'value')};
+            btNames = {'mean','median','grubbs'};
+            S.btMethod = btNames{get(hBtMethod,'value')};
             D = galea_erp_workflow(D, opt, S);
         else
             if logical(get(hSpectra,'value')) && usejava('desktop')
