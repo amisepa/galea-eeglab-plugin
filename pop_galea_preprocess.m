@@ -55,6 +55,8 @@ function [EEG, com] = pop_galea_preprocess(EEG, varargin)
 %   'asr2'     second ASR pass after ICA, 0 = skip  [0]
 %   'asr2mode' 'reconstruct' (default) or 'remove' for the second pass
 %   'viseeg'   plot the EEG before / after          [true]
+%   'badtrials' / 'badtrialmethod' - accepted and ignored here: bad-trial
+%              rejection is applied by pop_galea AFTER epoching (find_badTrials).
 %
 % PPG key/value:
 %   'ppg'       process PPG with BrainBeats         [true if a PPG stream exists]
@@ -806,6 +808,10 @@ end
 EEG.etc.galea.(name) = D;
 
 if vis && usejava('desktop')
+    % Uniform styling across EDA / EMG / IMU: one panel per channel, raw vs
+    % processed, legend on the first panel, bold 11-pt labels, box on, no
+    % grid, and a per-panel y range that clips extreme outliers so the shape
+    % of the signal stays readable (full range in the axis tooltip).
     figure('Color','w','Name',[name ' - raw (grey) vs processed']);
     tt = (0:D.pnts-1) / D.srate;
     tr = (0:raw.pnts-1) / raw.srate;
@@ -813,12 +819,27 @@ if vis && usejava('desktop')
     for k = 1:n
         subplot(n,1,k); hold on
         if k <= raw.nbchan
-            plot(tr, raw.data(k,:), 'Color',[.7 .7 .7]);
+            plot(tr, raw.data(k,:), 'Color',[.65 .65 .65], 'LineWidth',0.8, ...
+                'DisplayName','raw');
         end
-        plot(tt, D.data(k,:), 'Color',[0.20 0.40 0.70], 'LineWidth',1);
-        ylabel(D.chanlocs(k).labels, 'Interpreter','none');
-        box off; set(gca,'TickDir','out')
+        plot(tt, D.data(k,:), 'Color',[0.85 0.33 0.10], 'LineWidth',1.4, ...
+            'DisplayName','processed');
+        if k == 1, legend('Location','best', 'FontSize',9, 'Box','off'); end
+        ylabel(D.chanlocs(k).labels, 'Interpreter','none', ...
+            'FontWeight','bold', 'FontSize',11);
+        set(gca,'FontSize',10, 'FontWeight','bold', 'Box','on', ...
+            'TickDir','out', 'XGrid','off', 'YGrid','off', 'Layer','top');
+        % clip the y range to the robust signal band so single-sample spikes
+        % do not squash the trace (raw and processed share the range)
+        allv = [];
+        if k <= raw.nbchan, allv = [allv, raw.data(k,:)]; end
+        allv = [allv, D.data(k,:)];
+        lo = prctile(allv, 1); hi = prctile(allv, 99);
+        pad = 0.1 * max(hi - lo, eps);
+        ylim([lo - pad, hi + pad]);
     end
-    xlabel('Time (s)');
+    xlabel('Time (s)', 'FontWeight','bold', 'FontSize',11);
+    axH = findall(gcf,'Type','axes');
+    try, linkaxes(axH); catch, end
 end
 end

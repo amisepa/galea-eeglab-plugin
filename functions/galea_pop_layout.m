@@ -18,7 +18,7 @@ function H = galea_pop_layout(~)
 %
 % Cedric Cannard, 2026
 
-steps = [26 26 30 30 38 28 34 30 26 24 22 22 20 44 48 28 24 20 24 28];
+steps = [26 26 30 30 38 28 34 30 26 24 22 22 20 44 48 28 24 20 16 24 28 26 24 20 28 26 28];
 
 H = 130 + sum(steps) + 26 + 48;   % offset + last row (button) + button strip
 end

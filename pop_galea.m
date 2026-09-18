@@ -105,7 +105,8 @@ hLo = edt('0.5',[175 y 60 24]); k(end+1) = hLo;
 k(end+1) = lbl('to',[240 y 20 20]);
 hHi = edt('30',[262 y 60 24]);  k(end+1) = hHi;
 k(end+1) = lbl('Downsample (Hz, 0 = keep):', [340 y 170 20]);
-hRes = edt('0',[515 y 60 24]);  k(end+1) = hRes;
+hRes = edt('-',[515 y 60 24]);  k(end+1) = hRes;
+set(hRes, 'tooltipstring', 'Select a file first: the detected rate fills this box (keep = detected rate). Then pick a division or type a lower target.');
 hEegRate = lbl('detected: -', [583 y 100 20], 'fontangle','italic','fontsize',8);
 k(end+1) = hEegRate;
 hDiv = uicontrol(f,'style','popupmenu','position',[515 y-24 60 24],'backgroundcolor',c.btn, ...
@@ -118,12 +119,13 @@ y = y - 22;
 hBad  = chk('Detect bad channels', 1, [40 y 170 22]); k(end+1) = hBad;
 hInt  = chk('Interpolate them', 0, [215 y 150 22]);   k(end+1) = hInt;
 y = y - 22;
-k(end+1) = lbl('Bad-channel correlation threshold:', [40 y 250 20]);
+k(end+1) = lbl('Channel cross-correlation (R^2) threshold:', [40 y 250 20]);
 hCorr = edt('0.55', [290 y 60 24]); k(end+1) = hCorr;
 y = y - 20;
-k(end+1) = lbl('max fraction of flagged windows tolerated:', [356 y 250 20], ...
-    'fontangle','italic','fontsize',8);
-hMaxTol = edt('0.30', [290 y 60 24]); k(end+1) = hMaxTol;
+k(end+1) = lbl('Max % of windows a channel may fail (10-50%):', [40 y 250 20], ...
+    'fontsize',9);
+hMaxTol = edt('30', [290 y 60 24]); k(end+1) = hMaxTol;
+k(end+1) = lbl('%', [352 y 20 20]);
 y = y - 44;
 hAsrOn = chk('Artifact subspace reconstruction (ASR), threshold:', 1, [40 y 300 22]); k(end+1) = hAsrOn;
 hAsr = edt('100',[345 y 55 24]); k(end+1) = hAsr;
@@ -150,12 +152,45 @@ hAsr2Mode = uicontrol(f,'style','popupmenu','position',[450 y 115 24],'backgroun
      'continuous data). remove: the segments are deleted and any event markers ' ...
      'inside them are lost.']); k(end+1) = hAsr2Mode;
 y = y - 20;
-k(end+1) = lbl(['       Optional stricter cleanup once the eye-blink source has been ' ...
-                'subtracted and can no longer be damaged.'], [40 y 560 18], ...
+k(end+1) = lbl(['       Recommended for continuous recordings (e.g. resting state), where ' ...
+                'artefacts keep arriving. Skip it for ERP data: instead, reject bad'], [40 y 560 18], ...
                'fontangle','italic','fontsize',8);
+y = y - 16;
+k(end+1) = lbl(['       EPOCHS after epoching, with the plugin''s bad-trial detection (below).'], ...
+    [40 y 560 18], 'fontangle','italic','fontsize',8);
 y = y - 24;
 hVisE = chk('Plot EEG before / after', 1, [40 y 250 22]); k(end+1) = hVisE;
 secBox(end+1) = hEEG; secKids{end+1} = k;
+
+% ---- bad-trial detection (epoched data, replaces ASR2 for ERP) ----
+y = y - 28; sepline(y+18);
+sec('Bad-trial detection (after epoching)', [22 y 260 22]);
+bk = gobjects(0);
+y = y - 26;
+hBtOn = chk('Reject bad epochs after epoching', 0, [40 y 260 22]);
+y = y - 24;
+bk(end+1) = lbl('Sensitivity:', [40 y 90 20]);
+hBtMethod = uicontrol(f,'style','popupmenu','position',[135 y 130 24], ...
+    'backgroundcolor',c.btn, 'string',{'conservative (mean)','medium (median)','aggressive (Grubbs)'}, ...
+    'value',1, 'tooltipstring', ...
+    ['conservative: mean-based outlier criterion, flags the fewest trials (default). ' ...
+    'medium: median-based. aggressive: Grubbs outlier test, flags the most.']);
+y = y - 20;
+bk(end+1) = lbl(['Amplitude and high-frequency-residual outliers across epochs; the same criterion ' ...
+    'the study pipeline used (find_badTrials). Runs whenever the dataset is epoched ' ...
+    '(Tools > Extract epochs first).'], [40 y 620 30], 'fontangle','italic','fontsize',8);
+procKids = [procKids, hBtOn, bk];
+
+% ---- output ----
+y = y - 28; sepline(y+18);
+sec('Output', [22 y 200 22]);
+y = y - 26;
+hSave = chk('Save the processed dataset to a .set file when done', 0, [40 y 430 22]);
+hSaveFile = uicontrol(f,'style','pushbutton','string','Save as...', ...
+    'position',[560 y-2 118 26],'backgroundcolor',c.btn, 'callback',@(~,~) onPickSave());
+hSavePath = lbl('', [22 y-24 660 18], 'fontangle','italic','fontsize',8);
+S.savePath = '';
+procKids = [procKids, hSave, hSaveFile, hSavePath];
 
 % ---- peripheral signals (separate dialog) ----
 y = y - 28; sepline(y+18);
@@ -249,8 +284,27 @@ end
         if get(hAsr2On,'value'), v = str2double(get(hAsr2,'string')); end
     end
 
+    function v = resampleValue()
+        % '-' = no file probed yet -> keep (0). Numeric string = target rate.
+        s = strtrim(get(hRes,'string'));
+        v = str2double(s);
+        if ~isfinite(v), v = 0; end
+    end
+
     function onSelect()
-        [fn, fp] = uigetfile({'*.txt','Galea raw files (*.txt)'}, 'Select the main RAW file');
+        % Start the dialog where the plugin lives, in its sample_data
+        % folder: the shipped sample recordings are the natural first pick,
+        % and eegplugin_galea.m has already added this folder to the path.
+        startFolder = '';
+        try
+            pluginDir = fileparts(which('eegplugin_galea'));
+            if isempty(pluginDir), pluginDir = fileparts(mfilename('fullpath')); end
+            cand = fullfile(pluginDir, 'sample_data');
+            if isfolder(cand), startFolder = cand; end
+        catch
+        end
+        [fn, fp] = uigetfile({'*.txt','Galea raw files (*.txt)'}, ...
+            'Select the main RAW file', startFolder);
         if isequal(fn,0), return; end
 
         % Check the pair NOW, not at Run: no point letting someone set every
@@ -264,7 +318,9 @@ end
         end
 
         S.file = fn; S.path = fp;
-        set(hFile,'string',['selected:  ' fn '      (+ ' aux ')'],'foregroundcolor',c.text);
+        % Two lines: the name wraps instead of being cropped at the right edge.
+        set(hFile, 'string', {['selected:  ' fn], ['+ ' aux]}, 'foregroundcolor',c.text);
+        set(hFile, 'position', [22 y 660 32]);
         set(hRun,'enable','on');
 
         % show the detected sampling rates next to the downsample fields, and
@@ -273,11 +329,14 @@ end
         try
             rates = galea_probe_rates(fn, fp);
             if isfinite(rates.eeg)
+                S.eegRate = rates.eeg;
                 set(hEegRate, 'string', sprintf('detected: %g Hz', rates.eeg), ...
                     'foregroundcolor', c.text);
+                % The box holds the TARGET rate; start at keep (detected rate).
                 set(hRes, 'string', sprintf('%g', rates.eeg), 'tooltipstring', ...
-                    sprintf(['Detected EEG rate %g Hz. The box holds the current rate, ' ...
-                    'i.e. keep. Enter a lower value to downsample (0 also keeps).'], rates.eeg));
+                    sprintf(['Detected EEG rate %g Hz. The box holds the target rate - ' ...
+                    'it shows the detected rate (keep) until you pick a division or ' ...
+                    'enter a lower value. 0 also keeps.'], rates.eeg));
             end
             if isfinite(rates.ppg)
                 set(hAuxRate, 'string', sprintf('detected: %g Hz (EDA/PPG/EMG/IMU)', rates.ppg), ...
@@ -290,16 +349,36 @@ end
 
     function onDiv()
         % Safe downsampling by integer division of the DETECTED rate: 500 ->
-        % 250 -> 125, 250 -> 125, etc. Never invents a rate; just fills the
-        % Downsample box with detected/2 or detected/4.
+        % 250 -> 125, 250 -> 125, etc. The Downsample box always shows the
+        % resulting rate, so what you see is what the data will become.
         div = get(hDiv, 'value');          % 1 = keep, 2 = half, 3 = quarter
-        tok = regexp(get(hEegRate, 'string'), '(?<=detected: )\d+', 'match', 'once');
-        if isempty(tok)
-            set(hRes, 'string', '0');
-            return
+        r = [];
+        try, r = S.eegRate; catch, end
+        if isempty(r) || ~isfinite(r)
+            % fall back to the label text if the probe never ran
+            tok = regexp(get(hEegRate, 'string'), '(?<=detected: )[\d.]+', 'match', 'once');
+            if isempty(tok)
+                set(hRes, 'string', '0');
+                return
+            end
+            r = str2double(tok{1});
         end
-        r = str2double(tok{1});
-        set(hRes, 'string', sprintf('%g', r / 2^(div-1)));
+        if div == 1
+            set(hRes, 'string', sprintf('%g', r));       % keep: the detected rate
+        else
+            set(hRes, 'string', sprintf('%g', r / 2^(div-1)));
+        end
+    end
+
+    function onPickSave()
+        % Choose where the processed dataset goes. The .set extension is
+        % required by pop_saveset; the path shows under the checkbox.
+        [svFile, svPath] = uiputfile({'*.set','EEGLAB dataset (*.set)'}, ...
+            'Save processed dataset as', 'galea_processed.set');
+        if isequal(svFile,0), return; end
+        S.savePath = fullfile(svPath, svFile);
+        set(hSavePath, 'string', ['->  ' S.savePath], 'foregroundcolor', c.text);
+        set(hSave, 'value', 1);
     end
 
     function openPeriph()
@@ -338,23 +417,27 @@ end
         doProcess = logical(get(hDo,'value'));
         asrModes = get(hAsrMode,'string');
         asr2Modes = get(hAsr2Mode,'string');
+        btMethods = get(hBtMethod,'string');
+        btNames = {'mean','median','grubbs'};   % popup order -> find_badTrials names
         opt = struct( ...
             'eeg',      logical(get(hEEG,'value')), ...
             'trim',     str2double(get(hTrim,'string')), ...
             'locut',    str2double(get(hLo,'string')), ...
             'hicut',    str2double(get(hHi,'string')), ...
-            'resample', str2double(get(hRes,'string')), ...
+            'resample', resampleValue(), ...
             'causal',   logical(get(hCaus,'value')), ...
             'badchan',  logical(get(hBad,'value')), ...
             'interpchan', logical(get(hInt,'value')), ...
             'mincorr',  str2double(get(hCorr,'string')), ...
-            'maxtol',   str2double(get(hMaxTol,'string')), ...
+            'maxtol',   str2double(get(hMaxTol,'string')) / 100, ...   % % -> fraction
             'asr',      asrValue(), ...
             'asrmode',  asrModes{get(hAsrMode,'value')}, ...
             'ica',      logical(get(hIca,'value')), ...
             'asr2',     asr2Value(), ...
             'asr2mode', asr2Modes{get(hAsr2Mode,'value')}, ...
-            'viseeg',   logical(get(hVisE,'value')));
+            'viseeg',   logical(get(hVisE,'value')), ...
+            'badtrials', logical(get(hBtOn,'value')), ...
+            'badtrialmethod', btNames{get(hBtMethod,'value')});
 
         % peripheral (PPG/EDA/EMG/IMU) options come from the separate dialog;
         % if the user never opened it, keep the EEG-only defaults (ppg etc.
@@ -381,6 +464,48 @@ end
             catch ME
                 errordlg(sprintf('Processing failed: %s', ME.message), 'Galea');
                 return
+            end
+        end
+
+        % bad-trial rejection runs on the EPOCHED dataset: if the result is
+        % still continuous, tell the user to epoch first (the checkbox is for
+        % ERP workflows). find_badTrials needs EEG.data as ch x time x epochs.
+        if logical(get(hBtOn,'value')) && doProcess
+            if D.trials > 1
+                try
+                    btMethods = get(hBtMethod,'string'); %#ok<NASGU>
+                    bad = find_badTrials(D, btNames{get(hBtMethod,'value')}, false);
+                    if ~isempty(bad)
+                        fprintf('Removing %g bad epochs (%s criterion).\n', numel(bad), btNames{get(hBtMethod,'value')});
+                        D = pop_select(D, 'noepoch', bad);
+                    else
+                        fprintf('Bad-trial detection: no bad epochs found.\n');
+                    end
+                catch ME
+                    errordlg(sprintf('Bad-trial detection failed: %s', ME.message), 'Galea');
+                end
+            else
+                warndlg({'Bad-trial detection needs an EPOCHED dataset.', ...
+                         'Run Tools > Extract epochs first, then re-run this window.'}, 'Galea');
+            end
+        end
+
+        % optional save, requested in the Output section
+        saveIt = logical(get(hSave,'value'));
+        if saveIt && isempty(S.savePath)
+            % checkbox ticked without picking a file: default next to the data
+            try
+                S.savePath = fullfile(S.path, [S.file(1:max(1,end-4)) '_processed.set']);
+            catch
+                S.savePath = fullfile(pwd, 'galea_processed.set');
+            end
+        end
+        if saveIt
+            try
+                D = pop_saveset(D, 'filename', S.savePath);
+                fprintf('Processed dataset saved: %s\n', S.savePath);
+            catch ME
+                errordlg(sprintf('Save failed: %s', ME.message), 'Galea');
             end
         end
 

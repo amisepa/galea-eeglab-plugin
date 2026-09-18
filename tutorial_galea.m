@@ -133,3 +133,32 @@ legend('Location','best'); box off; set(gca,'TickDir','out')
 % Group level: loop steps 1-6 over participants, collect each one into
 % allERP(subject, condition, channel, time), then average over subjects and
 % test across them. analysis/rerun_final_stats.m does exactly that.
+
+
+%% 8. Spectra of a continuous recording
+% The resting-state sample (Sample-Data-OpenBCI-RAW-RestingState.txt) has no
+% markers: import it, preprocess WITHOUT the causal filter (nothing to
+% anticipate), and look at the spectra. pop_spectopo gives the channel
+% spectra; 'freqrange' [1 70] covers delta to gamma at the 250 Hz sample rate.
+%
+% GUI route: load the resting-state file with the Galea menu, preprocess,
+% then Plot > Channel properties > Spectra (or the command below).
+
+RESTFILE = fullfile(fileparts(mfilename('fullpath')), ...
+    'sample_data', 'Sample-Data-OpenBCI-RAW-RestingState.txt');
+if ~isfile(RESTFILE)
+    RESTFILE = fullfile(pwd, 'sample_data', 'Sample-Data-OpenBCI-RAW-RestingState.txt');
+end
+assert(isfile(RESTFILE), 'Resting-state sample not found: %s', RESTFILE);
+[rfPath, rName, rExt] = fileparts(RESTFILE);
+
+EEGrest = pop_galea_import('montage','default', 'filename',[rName rExt], 'filepath',rfPath);
+EEGrest = pop_galea_preprocess(EEGrest, 'resample',250, 'locut',1, 'hicut',70, ...
+    'causal',false, 'badchan',true, 'asr',100, 'ica',false);
+
+figure('Color','w');
+pop_spectopo(EEGrest, 1, [], 'EEG', 'freq', [6 10 22], 'freqrange',[1 70], 'electrodes','off');
+title('Resting-state spectra, 1-70 Hz (one participant)');
+
+% What to look for: the eyes-closed alpha peak near 10 Hz, theta around 6 Hz,
+% beta around 22 Hz. A flat spectrum above ~40 Hz is normal for dry electrodes.

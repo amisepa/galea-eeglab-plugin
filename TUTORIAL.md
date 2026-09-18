@@ -117,3 +117,21 @@ channels > Average over trials** (or, in the script version,
   import on a continuous dataset:
   [`sample_data/`](sample_data/)
 
+## 8. Spectra of a continuous recording
+
+The resting-state sample (`sample_data/Sample-Data-OpenBCI-RAW-RestingState.txt`,
+5.5 min, no markers) is for trying the plugin on continuous data. Load it with
+the **Galea** menu, preprocess with the causal filter OFF (nothing to
+anticipate in resting state; a 1-70 Hz band is enough for spectra), then plot
+the spectra:
+
+```matlab
+figure; pop_spectopo(EEG, 1, [], 'EEG', 'freq', [6 10 22], 'freqrange',[1 70], 'electrodes','off');
+```
+
+or through the GUI: **Plot > Channel properties > Spectra** (set the frequency
+range to 1-70 Hz). What to look for: the eyes-closed alpha peak near 10 Hz,
+theta around 6 Hz, beta around 22 Hz; a flat spectrum above ~40 Hz is normal
+for dry electrodes.
+
+> **TODO**: screenshot of the spectra figure here.

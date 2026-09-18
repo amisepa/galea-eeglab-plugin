@@ -189,11 +189,15 @@ for iChan = 1:EEG.nbchan
     EEG.chanlocs(iChan).labels = chanLabels{iChan};
 end
 
-% EEG channel locations
+% EEG channel locations: always fill them from the EEGLAB dipfit BEM
+% template. Downstream tools (BrainBeats bad-channel detection, topoplot,
+% dipfit) all need coordinates, and a missing template is what triggers
+% BrainBeats' 'incorrect electrode locations' warning. Resolve the template
+% three ways: dipfit on the path, the eeglab/plugins folder next to the
+% EEGLAB root, then any standard_1005.elc under the EEGLAB folder.
 % if mode == 1
     EEG = eeg_checkset(EEG);
-    locPath = fileparts(which('dipfitdefs.m'));
-    EEG = pop_chanedit(EEG,'lookup',fullfile(locPath,'standard_BEM','elec','standard_1005.elc'));
+    EEG = galea_lookup_locs(EEG);
 % end
 
 % % Event markers
@@ -513,5 +517,27 @@ IMU = pop_select(TMP, 'channel', {'ACC_X' 'ACC_Y' 'ACC_Z' 'GYR_X' 'GYR_Y' 'GYR_Z
 
 % Aux
 AUX = pop_select(TMP, 'channel', {'Battery' 'Board_temp'});
+end
 
-
+% ---------------------------------------------------------------------------
+function EEG = galea_lookup_locs(EEG)
+% Locate the dipfit standard_BEM template even when dipfit is not on the
+% MATLAB path (e.g. a bare eeglab folder without submodules initialised).
+locPath = fileparts(which('dipfitdefs.m'));
+elc = fullfile(locPath, 'standard_BEM', 'elec', 'standard_1005.elc');
+if ~isfile(elc)
+    % walk the eeglab tree from eeglab.m
+    eegRoot = fileparts(which('eeglab'));
+    if ~isempty(eegRoot)
+        cands = dir(fullfile(eegRoot, '**', 'standard_1005.elc'));
+        if ~isempty(cands)
+            elc = fullfile(cands(1).folder, cands(1).name);
+        end
+    end
+end
+if isfile(elc)
+    EEG = pop_chanedit(EEG, 'lookup', elc);
+else
+    warning('Galea: standard_1005.elc not found - channel locations left unfilled. Install/put the dipfit plugin on the path.');
+end
+end

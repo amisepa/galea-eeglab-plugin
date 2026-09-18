@@ -31,12 +31,8 @@ c = galea_colors();
 W = 580;
 scr = get(0, 'ScreenSize');
 % measure-first: same decrements as the layout code below
-H = 36 + 30 ...
-  + 26 + 26 + 26 + 24 + 20 ...        % PPG
-  + 26 + 26 + 24 + 20 ...             % EDA
-  + 26 + 26 + 20 ...                  % EMG
-  + 26 + 26 ...                       % IMU
-  + 56;                               % buttons + bottom margin
+% 1 title row (30) + 15 content rows (26 each) + buttons strip (56)
+H = 36 + 30 + 26*15 + 56;
 H = min(H, scr(4) - 80);
 f = figure('Name','Galea peripheral signals', 'NumberTitle','off', 'MenuBar','none', ...
     'ToolBar','none', 'Resize','off', 'Color',c.back, 'WindowStyle','modal', ...
@@ -88,10 +84,10 @@ hHt = cb('time', double(d.hrvtime), [145 y 70 22]);
 hHf = cb('frequency', double(d.hrvfreq), [220 y 90 22]);
 hHn = cb('nonlinear', double(d.hrvnonlin), [315 y 90 22]);
 pg(end+1) = hHt; pg(end+1) = hHf; pg(end+1) = hHn;
-y = y - 24;
+y = y - 26;
 hVisP = cb('Plot heartbeat detection and HRV outputs', double(d.visppg), [40 y W-70 22]);
 pg(end+1) = hVisP;
-y = y - 20; sep(y);
+y = y - 26; sep(y);
 
 % ---------------- EDA ----------------
 hEda = box('EDA (skin conductance)', double(d.eda), [20 y 260 24]);
@@ -102,31 +98,39 @@ txt('to', [242 y 20 20]);
 hEHi = ed(sprintf('%g', d.edahicut), [268 y 60 24]);
 txt('Downsample (Hz):', [340 y 120 20]);
 hERes = ed(sprintf('%g', d.edaresample), [495 y 60 24]);
-y = y - 24;
-hPhasic = cb('Split tonic / phasic (cvxEDA)', double(d.edaphasic), [40 y 250 22]);
-hVisD   = cb('Plot EDA', double(d.viseda), [300 y 130 22]);
-y = y - 20; sep(y);
+y = y - 26;
+txt('Tonic / phasic split:', [40 y 130 20]);
+hPhasic = cb('cvxEDA decomposition', double(d.edaphasic), [175 y 180 22]);
+y = y - 26;
+hVisD = cb('Plot EDA (raw vs processed)', double(d.viseda), [40 y W-70 22]);
+y = y - 26; sep(y);
 
 % ---------------- EMG ----------------
 hEmg = box('EMG (facial)', double(d.emg), [20 y 260 24]);
 y = y - 26;
 txt('High-pass (Hz):', [40 y 130 20]);
 hMLo = ed(sprintf('%g', d.emglocut), [175 y 60 24]);
-hEnv = cb('Rectify + envelope', double(d.emgenvelope), [268 y 180 22]);
-hVisM = cb('Plot EMG', double(d.visemg), [460 y 110 22]);
-y = y - 20; sep(y);
+y = y - 26;
+txt('Envelope:', [40 y 130 20]);
+hEnv = cb('Rectify + 100 ms moving average', double(d.emgenvelope), [175 y 260 22]);
+y = y - 26;
+hVisM = cb('Plot EMG (raw vs processed)', double(d.visemg), [40 y W-70 22]);
+y = y - 26; sep(y);
 
 % ---------------- IMU ----------------
 hImu = box('IMU (head motion)', double(d.imu), [20 y 260 24]);
 y = y - 26;
 txt('Low-pass (Hz):', [40 y 130 20]);
 hIHi = ed(sprintf('%g', d.imuhicut), [175 y 60 24]);
-hMag = cb('Add acceleration magnitude', double(d.imumagnitude), [268 y 220 22]);
-hVisI = cb('Plot IMU', double(d.visimu), [500 y 70 22]);
+y = y - 26;
+txt('Derived channel:', [40 y 130 20]);
+hMag = cb('Acceleration magnitude (ACC_MAG)', double(d.imumagnitude), [175 y 280 22]);
+y = y - 26;
+hVisI = cb('Plot IMU (raw vs processed)', double(d.visimu), [40 y W-70 22]);
 
 % grey the whole PPG section out when there is no PPG stream
 if ~hasPPG
-    txt('no PPG stream in this dataset', [300 y+58 240 20], 'fontangle','italic');
+    txt('no PPG stream in this dataset', [300 y+4 240 20], 'fontangle','italic');
     set(pg(isgraphics(pg)), 'enable', 'off');
     set(hPpg, 'enable', 'off');
 end
