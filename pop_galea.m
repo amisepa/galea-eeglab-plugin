@@ -22,7 +22,7 @@ S = struct('file','', 'path','', 'EEG',[], 'ok',false, 'savePath','', 'eegRate',
 
 W = 860;
 scr = get(0,'ScreenSize');
-H = 620;                              % fixed, roomy: no cropping anywhere
+H = 672;                              % fixed, roomy: no cropping anywhere
 H = min(H, scr(4) - 80);
 f = figure('Name','Galea', 'NumberTitle','off', 'MenuBar','none', 'ToolBar','none', ...
     'Resize','off', 'Color',c.back, 'WindowStyle','modal', ...
@@ -96,19 +96,20 @@ procOpt = [];    % full option set returned by the parameters dialog ([] = defau
 % ---------- Continuous / ERP ----------
 y = y - 64; sepline(y+18);
 sec('Data type', [22 y 200 22]);
-y = y - 26;
+y = y - 28;
 hCont = uicontrol(f,'style','radiobutton','string','Continuous data (resting state, spectra)', ...
     'value',1,'position',[40 y 400 22], 'backgroundcolor',c.back,'foregroundcolor',c.text, ...
-    'callback',@(~,~) modeNote());
+    'callback',@(~,~) toggleMode());
 hErp  = uicontrol(f,'style','radiobutton','string','ERP data (segment, clean, average)', ...
-    'value',0,'position',[40 y-24 400 22], 'backgroundcolor',c.back,'foregroundcolor',c.text, ...
+    'value',0,'position',[40 y-26 400 22], 'backgroundcolor',c.back,'foregroundcolor',c.text, ...
     'callback',@(~,~) toggleMode());
 procKids = [procKids, hCont, hErp];
 
-% --- continuous-only controls ---
-y = y - 30;
+% --- continuous-only controls (own rows, below the radios) ---
+y = y - 34;
 ck = gobjects(0);
-lbl('2nd ASR pass, threshold (0 = skip):', [60 y 260 20]);  hAsr2 = edt('0', [330 y+2 60 24]);
+lbl('2nd ASR pass, threshold (0 = skip):', [60 y 260 20]);
+hAsr2 = edt('0', [330 y+2 60 24]);
 ck(end+1) = hAsr2;
 lbl('mode:', [400 y 40 20]);
 hAsr2Mode = uicontrol(f,'style','popupmenu','position',[440 y 130 24],'backgroundcolor',c.btn, ...
@@ -116,22 +117,22 @@ hAsr2Mode = uicontrol(f,'style','popupmenu','position',[440 y 130 24],'backgroun
     ['reconstruct: flagged segments are interpolated (default, safest for ' ...
      'continuous data). remove: the segments are deleted.']);
 ck(end+1) = hAsr2Mode;
-y = y - 26;
+y = y - 28;
 hSpectra = uicontrol(f,'style','checkbox', ...
     'string','Plot power spectra of the whole recording (1-70 Hz) at the end', ...
-    'value',0,'position',[60 y 480 22],'backgroundcolor',c.back,'foregroundcolor',c.text);
+    'value',0,'position',[60 y 520 22],'backgroundcolor',c.back,'foregroundcolor',c.text);
 ck(end+1) = hSpectra;
 
-% --- ERP-only controls ---
+% --- ERP-only controls (own rows, below the continuous block) ---
 ek = gobjects(0);
 yE = y;
 lbl('Epoch window (s):', [60 yE 140 20]);
 hEpWin = edt('[-1.5 1.5]', [200 yE 120 24]);
 ek(end+1) = hEpWin;
-yE = yE - 26;
+yE = yE - 28;
 hBtOn = chk('Reject bad trials', 0, [60 yE 180 22]);
-lbl('sensitivity:', [245 yE+2 90 20]);
-hBtMethod = uicontrol(f,'style','popupmenu','position',[340 yE 190 24], ...
+lbl('sensitivity:', [250 yE+2 90 20]);
+hBtMethod = uicontrol(f,'style','popupmenu','position',[345 yE 200 24], ...
     'backgroundcolor',c.btn, 'string',{'conservative (mean)','medium (median)','aggressive (Grubbs)'}, ...
     'value',1, 'tooltipstring', ...
     ['conservative: mean-based outlier criterion, flags the fewest trials (default). ' ...
@@ -139,22 +140,25 @@ hBtMethod = uicontrol(f,'style','popupmenu','position',[340 yE 190 24], ...
     'Amplitude and high-frequency-residual outliers across epochs (find_badTrials).']);
 ek(end+1) = hBtOn; ek(end+1) = hBtMethod;
 yE = yE - 28;
-lbl('Plot condition ERPs:', [60 yE 140 20]);
-hCond = uicontrol(f,'style','popupmenu','position',[210 yE 440 24],'backgroundcolor',c.btn, ...
+lbl('Plot condition ERPs:', [60 yE 150 20]);
+hCond = uicontrol(f,'style','popupmenu','position',[220 yE 440 24],'backgroundcolor',c.btn, ...
     'string',{'(select a file to list its events)'}, 'enable','off', ...
     'tooltipstring','Condition of interest for the ERP plot. The list comes from the markers in the selected file.');
 ek(end+1) = hCond;
-yE = yE - 26;
+yE = yE - 28;
 hEegPlot = chk('Also plot EEG before / after cleaning', 1, [60 yE 420 22]);
 ek(end+1) = hEegPlot;
 
+% the Output section starts below whichever block is lower (ERP is)
+y = yE - 20;
+
 % ---------- output ----------
-y = yE - 24; sepline(y+18);
+sepline(y+18);
 y = y - 26;
 hSave = chk('Save the processed dataset to a .set file when done', 0, [40 y 430 24]);
 hSaveFile = uicontrol(f,'style','pushbutton','string','Save as...', ...
-    'position',[560 y-2 118 26],'backgroundcolor',c.btn, 'callback',@(~,~) onPickSave());
-hSavePath = lbl('', [22 y-22 780 18], 'fontangle','italic','fontsize',8);
+    'position',[660 y-2 118 26],'backgroundcolor',c.btn, 'callback',@(~,~) onPickSave());
+hSavePath = lbl('', [40 y-22 780 18], 'fontangle','italic','fontsize',8);
 S.savePath = '';
 procKids = [procKids, hSave, hSaveFile, hSavePath];
 
