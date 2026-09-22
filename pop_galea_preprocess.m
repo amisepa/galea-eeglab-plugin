@@ -52,20 +52,57 @@ function [EEG, com] = pop_galea_preprocess(EEG, varargin)
 %              markers that fell inside them are listed in the console) ['reconstruct']
 %   'ica'      ICA, remove the ocular component     [true]
 %   'icaconfirm' ask before removing the component  [true]
+%              (command line only; the GUI always asks)
 %   'asr2'     second ASR pass after ICA, 0 = skip  [0]
 %   'asr2mode' 'reconstruct' (default) or 'remove' for the second pass
 %   'viseeg'   plot the EEG before / after          [true]
 %   'badtrials' / 'badtrialmethod' - accepted and ignored here: bad-trial
 %              rejection is applied by pop_galea AFTER epoching (find_badTrials).
+%%
+% EOG key/value (ElectroOculoGraphy - the VEOG/HEOG eye channels):
+%   'eog'       filter the EOG and detect blinks    [true]
+%   'eoglocut'  EOG high-pass, Hz                   [0.5]
+%   'eoghicut'  EOG low-pass, Hz                    [20]
+%   'viseog'    plot VEOG with detected blinks + the blink rate [true]
 %
 % PPG key/value:
 %   'ppg'       process PPG with BrainBeats         [true if a PPG stream exists]
 %   'ppglocut'  PPG high-pass, Hz                   [0.5]
 %   'ppghicut'  PPG low-pass, Hz                    [3]
+%   'ppgdetect' pulse-wave detection                ['valleys']
+%               'valleys' (default) or 'peaks' - passed to BrainBeats get_RR
 %   'rrcorrect' RR artefact interpolation           ['pchip']
 %               pchip | linear | spline | makima | nearest | remove
+%               (command line only; pchip is the default and the GUI does not
+%               expose it - ask for removal first, interpolation second)
 %   'hrvtime' / 'hrvfreq' / 'hrvnonlin'  feature sets   [true/true/false]
-%   'visppg'    BrainBeats cleaning and output plots [true]
+%   'visppg'    BrainBeats cleaning plot (plot_NN) + the HRV output plots [true]
+%
+% EDA key/value:
+%   'eda'       filter the EDA (0.01-1 Hz)          [false]
+%   'edalocut' / 'edahicut'  EDA bandpass, Hz       [0.01 / 1]
+%   'edaphasic' cvxEDA tonic/phasic decomposition   [false]
+%               (solved at 8 Hz - inside the 4-10 Hz band the literature
+%               finds useful for EDA deconvolution; no user-facing
++%               downsample option)
+%   'viscvx'    plot the tonic/phasic decomposition on one time-course [true]
+%   'viseda'    plot the EDA raw vs processed       [true]
+%
+% EMG key/value (facial EMG on the Galea disc electrodes; the Aux stream is
+% only ~50 Hz, so this is a coarse activity index, not a conventional EMG):
+%   'emg'         filter the EMG (high-pass)        [false]
+%   'emglocut'    EMG high-pass, Hz                 [20]
+%   'emghicut'    EMG low-pass, Hz, 0 = none        [0]
+%   'emgenvelope' rectify + 100 ms moving-average envelope [true]
+%   'visemg'      plot the EMG (+ envelope when computed)  [true]
+%
+% IMU key/value (inertial measurement unit - head motion):
+%   'imu'          filter the IMU (low-pass)        [false]
+%   'imuhicut'     IMU low-pass, Hz                 [10]
+%   'imumagnitude' add the ACC_MAG channel: the magnitude of the 3 acceleration
+%                  axes, i.e. a single orientation-independent HEAD-MOTION
+%                  METRIC (deviations from 1 g = movement)  [true]
+%   'visimu'       plot all IMU channels incl. ACC_MAG [true]
 %
 % Cedric Cannard, 2026
 
@@ -79,11 +116,13 @@ hasEvents = ~isempty(EEG.event);
 g = struct('eeg',true, 'trim',3, 'resample',0, 'locut',0.5, 'hicut',30, 'causal',false, ...
            'polarity',false, 'badchan',true, 'mincorr',0.55, 'maxtol',0.30, 'interpchan',false, ...
            'asr',100, 'asrmode','remove', 'ica',true, 'icaconfirm',true, 'asr2',0, 'asr2mode','reconstruct', 'viseeg',true, ...
-           'ppg',hasPPG, 'ppglocut',0.5, 'ppghicut',3, 'rrcorrect','pchip', ...
+           'eog',true, 'eoglocut',0.5, 'eoghicut',20, 'viseog',true, ...
+           'ppg',hasPPG, 'ppglocut',0.5, 'ppghicut',3, 'ppgdetect','valleys', ...
+           'rrcorrect','pchip', ...   % BrainBeats RR interpolation; pchip by default, command line only
            'hrvtime',true, 'hrvfreq',true, 'hrvnonlin',false, 'visppg',true, ...
-           'eda',false, 'edalocut',0.01, 'edahicut',1, 'edaresample',8, ...
-           'edaphasic',false, 'viseda',true, ...
-           'emg',false, 'emglocut',20, 'emgenvelope',true, 'visemg',true, ...
+           'eda',false, 'edalocut',0.01, 'edahicut',1, ...
+           'edaphasic',false, 'viscvx',true, 'viseda',true, ...
+           'emg',false, 'emglocut',20, 'emghicut',0, 'emgenvelope',true, 'visemg',true, ...
            'imu',false, 'imuhicut',10, 'imumagnitude',true, 'visimu',true);
 
 if nargin > 1
@@ -297,8 +336,9 @@ end
 end  % if g.eeg
 
 % ---- other modalities, one at a time ----
+if g.eog, EEG = galea_process_eog(EEG, g); end
 if g.ppg, EEG = galea_process_ppg(EEG, g); end
-if g.eda, EEG = galea_process_stream(EEG, 'EDA', g); end
+if g.eda, EEG = galea_process_eda(EEG, g); end
 if g.emg, EEG = galea_process_stream(EEG, 'EMG', g); end
 if g.imu, EEG = galea_process_stream(EEG, 'IMU', g); end
 
@@ -398,13 +438,12 @@ eegKids(end+1) = hDiv;
         set(hRes, 'string', sprintf('%g', srate / d(get(hDiv, 'value'))));
     end %#ok<*AGROW>
 y = y - 26;
-txt('Bandpass (Hz):', [40 y 250 20]);
-hLo = ed('0.5', [300 y 70 24]);  txt('to', [376 y 20 20]);  hHi = ed('30', [400 y 70 24]);
-eegKids(end+1) = hLo; eegKids(end+1) = hHi;
+txt('Bandpass (Hz):', [40 y 100 20]);
+hLo = ed('0.5', [145 y 60 24]);  txt('to', [212 y 20 20]);  hHi = ed('30', [238 y 60 24]);
+hCaus = cb('minimum-phase causal filter (only for pre-stimulus analyses)', 0, ...
+    [310 y W-340 22]);
+eegKids(end+1) = hLo; eegKids(end+1) = hHi; eegKids(end+1) = hCaus;
 y = y - 24;
-hCaus = cb('Minimum-phase causal filter (only for pre-stimulus analyses)', 0, [40 y W-70 22]);
-eegKids(end+1) = hCaus;
-y = y - 22;
 hPol  = cb('Correct Fp1/Fp2 polarity (custom montage with disc electrodes)', 0, [40 y W-70 22]);
 eegKids(end+1) = hPol;
 
@@ -414,41 +453,32 @@ eegKids(end+1) = hBad;
 hInterp = cb('Interpolate them', 0, [250 y 160 22]);
 eegKids(end+1) = hInterp;
 y = y - 24;
-txt('Bad-channel correlation threshold:', [40 y 250 20]);
-hCorr = ed('0.55', [300 y 70 24]);
+txt('Channel cross-correlation threshold (lax 0.35 - aggressive 0.85):', [40 y 340 20]);
+hCorr = ed('0.55', [385 y 70 24]);
 eegKids(end+1) = hCorr;
 y = y - 24;
-txt('max fraction of flagged windows tolerated:', [40 y 250 20]);
-hMaxTol = ed('0.30', [300 y 70 24]);
+txt('Max % of windows a channel may fail before removal (5-50%):', [40 y 340 20]);
+hMaxTol = ed('30', [385 y 70 24]);
 eegKids(end+1) = hMaxTol;
 y = y - 26;
-txt('ASR threshold (0 = skip):', [40 y 250 20]);     hAsr = ed('100', [300 y 70 24]);
+hAsr = cb('ASR 1st pass', 1, [40 y 140 22]);
 eegKids(end+1) = hAsr;
-txt('mode:', [376 y 40 20]);
-hAsrMode = uicontrol(f,'style','popupmenu','position',[415 y 110 24], ...
+hAsrTh = ed('100', [185 y 70 24]);
+eegKids(end+1) = hAsrTh;
+txt('threshold (lenient ~100):', [262 y 160 20], 'fontangle','italic');
+hAsrMode = uicontrol(f,'style','popupmenu','position',[430 y 110 24], ...
     'backgroundcolor',c.btn, 'string',{'reconstruct','remove'},'value',2, ...
     'tooltipstring', ['remove: flagged segments are deleted (default; event markers inside them are ' ...
     'listed and stored). reconstruct: flagged segments are interpolated instead.']);
 eegKids(end+1) = hAsrMode;
 y = y - 20;
-txt('     Before ICA, a lenient threshold deletes only the worst segments while', [40 y W-70 18], ...
-    'fontangle','italic','fontsize',8);
-y = y - 16;
-txt('     leaving blinks largely intact, so ICA can separate the eye-blink', [40 y W-70 18], ...
-    'fontangle','italic','fontsize',8);
-y = y - 16;
-txt('     source cleanly. A strict threshold here would eat part of the', [40 y W-70 18], ...
-    'fontangle','italic','fontsize',8);
-y = y - 16;
-txt('     blinks and the ICA decomposition would no longer be clean.', [40 y W-70 18], ...
+txt('     Lenient first pass so ICA can still separate the blink source.', [40 y W-70 18], ...
     'fontangle','italic','fontsize',8);
 
 y = y - 22;
-hIca  = cb('ICA, remove the ocular component', 1, [40 y 300 22]);
+hIca  = cb('ICA: Extract the most likely eye component (eyes-open data; visual check and confirmation required)', ...
+    1, [40 y W-70 22]);
 eegKids(end+1) = hIca;
-y = y - 22;
-hConf = cb('ask me to confirm which component first (recommended)', 1, [60 y W-90 22]);
-eegKids(end+1) = hConf;
 y = y - 22;
 txt('ASR pass after ICA (0 = skip):', [40 y 250 20]);  hAsr2 = ed('0', [300 y 70 24]);
 eegKids(end+1) = hAsr2;
@@ -472,7 +502,7 @@ y = y - 18; sep(y);
 
 % ---------------- peripheral signals (separate dialog) ----------------
 y = y - 26;
-uicontrol(f,'style','pushbutton','string','Set PPG / EDA / EMG / IMU options...', ...
+uicontrol(f,'style','pushbutton','string','Set EOG / PPG / EDA / EMG / IMU options...', ...
     'position',[20 y W-40 28],'backgroundcolor',c.btn,'callback',@(~,~) openPeriph());
 if ~hasPPG
     txt('no PPG stream in this dataset', [20 y-24 300 20], 'fontangle','italic');
@@ -487,12 +517,15 @@ perOpt = [];   % options returned by the peripheral dialog ([] = keep g's values
     function openPeriph()
         % Parameters for the auxiliary streams live in their own dialog, so
         % this window stays readable. Starts from the current values.
-        def = struct('ppg',g.ppg, 'ppglocut',g.ppglocut, 'ppghicut',g.ppghicut, ...
-            'rrcorrect',g.rrcorrect, 'hrvtime',g.hrvtime, 'hrvfreq',g.hrvfreq, ...
+        def = struct('eog',g.eog, 'eoglocut',g.eoglocut, 'eoghicut',g.eoghicut, ...
+            'viseog',g.viseog, ...
+            'ppg',g.ppg, 'ppglocut',g.ppglocut, 'ppghicut',g.ppghicut, ...
+            'ppgdetect',g.ppgdetect, 'hrvtime',g.hrvtime, 'hrvfreq',g.hrvfreq, ...
             'hrvnonlin',g.hrvnonlin, 'visppg',g.visppg, ...
             'eda',g.eda, 'edalocut',g.edalocut, 'edahicut',g.edahicut, ...
-            'edaresample',g.edaresample, 'edaphasic',g.edaphasic, 'viseda',g.viseda, ...
-            'emg',g.emg, 'emglocut',g.emglocut, 'emgenvelope',g.emgenvelope, 'visemg',g.visemg, ...
+            'edaphasic',g.edaphasic, 'viscvx',g.viscvx, 'viseda',g.viseda, ...
+            'emg',g.emg, 'emglocut',g.emglocut, 'emghicut',g.emghicut, ...
+            'emgenvelope',g.emgenvelope, 'visemg',g.visemg, ...
             'imu',g.imu, 'imuhicut',g.imuhicut, 'imumagnitude',g.imumagnitude, 'visimu',g.visimu);
         if ~isempty(perOpt), def = perOpt; end
         res = galea_periph_gui(def, hasPPG);
@@ -523,12 +556,16 @@ g = out;
         out.badchan    = logical(get(hBad,'value'));
         out.interpchan = logical(get(hInterp,'value'));
         out.mincorr    = str2double(get(hCorr,'string'));
-        out.maxtol     = str2double(get(hMaxTol,'string'));
-        out.asr        = str2double(get(hAsr,'string'));
+        out.maxtol     = str2double(get(hMaxTol,'string')) / 100;   % % -> fraction
+        if logical(get(hAsr,'value'))
+            out.asr    = str2double(get(hAsrTh,'string'));
+        else
+            out.asr    = 0;                    % unchecked = skip the 1st pass
+        end
         asrModes = get(hAsrMode,'string');
         out.asrmode    = asrModes{get(hAsrMode,'value')};
         out.ica        = logical(get(hIca,'value'));
-        out.icaconfirm = logical(get(hConf,'value'));
+        out.icaconfirm = true;    % GUI always confirms; command line may disable
         out.asr2       = str2double(get(hAsr2,'string'));
         asr2Modes = get(hAsr2Mode,'string');
         out.asr2mode   = asr2Modes{get(hAsr2Mode,'value')};
@@ -571,16 +608,14 @@ end
 y = y + 20 + 1;                % separator
 y = y + 26;                    % 'Process EEG'
 y = y + 26;                    % downsample (+ current-rate label + division popup on same row)
-y = y + 26;                    % bandpass
-y = y + 24;                    % causal
-y = y + 22;                    % polarity
+y = y + 26;                    % bandpass + causal on the same line
+y = y + 24;                    % polarity
 y = y + 28;                    % bad channels + interpolate
-y = y + 24;                    % sensitivity preset
 y = y + 24;                    % correlation threshold
-y = y + 26;                    % ASR threshold + mode
-y = y + 20 + 16 + 16 + 16 + 16;% ASR explanation lines
+y = y + 24;                    % max % windows
+y = y + 26;                    % ASR 1st pass checkbox + threshold + mode
+y = y + 20 + 16;               % ASR explanation line
 y = y + 22;                    % ICA
-y = y + 22;                    % confirm components
 y = y + 22;                    % ASR pass 2
 y = y + 20 + 16 + 16;          % ASR2 explanation lines
 y = y + 20;                    % plot before/after
@@ -727,6 +762,7 @@ try
     PPG = brainbeats_process(PPG, 'analysis','features', ...
         'heart_signal','ppg', 'heart_channels',{PPG.chanlocs.labels}, ...
         'clean_eeg', 0, ...                        % EEG is cleaned above, not here
+        'ppg_detect_mode', g.ppgdetect, ...        % pulse-wave valleys (default) or peaks
         'rr_correct', g.rrcorrect, ...
         'hrv_features', feats, ...
         'vis_cleaning', double(g.visppg), 'vis_outputs', double(g.visppg), ...
@@ -736,21 +772,175 @@ try
         EEG.etc.galea.HRV = PPG.etc.features;
         fprintf('  HRV features stored in EEG.etc.galea.HRV\n');
     end
+    % BrainBeats already drew plot_NN (signal + detected/corrected beats +
+    % NN series) above when vis_cleaning was on; add our richer HRV figure.
+    if g.visppg && isfield(EEG.etc.galea,'HRV') && ~isempty(EEG.etc.galea.HRV)
+        galea_plot_hrv(EEG.etc.galea.HRV, PPG);
+    end
 catch ME
     warning('BrainBeats failed: %s', ME.message);
 end
 end
 
 % ---------------------------------------------------------------------------
-function EEG = galea_process_stream(EEG, name, g)
-% EDA, EMG and IMU. Each is filtered in its own band, optionally given a
-% derived channel, and stored back in EEG.etc.galea. They are not merged into
-% the EEG dataset: the sampling rates and units differ.
+function EEG = galea_process_eog(EEG, g)
+% ElectroOculoGraphy: the VEOG (vertical, blinks) and HEOG (horizontal,
+% saccades) channels recorded on the headset rim. Filter them in an eye band,
+% then detect blinks on VEOG with an amplitude + duration criterion - the
+% same approach as the analysis pipeline (galea_pipeline_v5_EOG.m). The blink
+% count and rate are the standard EOG output metrics; the figure shows VEOG
+% with the detected blinks marked.
+
+if ~isfield(EEG.etc,'galea') || ~isfield(EEG.etc.galea,'EOG') || ...
+        isempty(EEG.etc.galea.EOG) || EEG.etc.galea.EOG.nbchan == 0
+    disp('No EOG stream in this recording; skipping.');
+    return
+end
+
+D = EEG.etc.galea.EOG;
+fprintf('EOG: %.2f-%.2f Hz (min-phase causal), blink detection on VEOG\n', ...
+    g.eoglocut, g.eoghicut);
+D = pop_eegfiltnew(D, 'locutoff', g.eoglocut, 'hicutoff', g.eoghicut, 'minphase', true);
+EEG.etc.galea.EOG = D;
+
+% ---- blink detection on VEOG (amplitude threshold + plausible duration) ----
+labs = lower({D.chanlocs.labels});
+vIdx = find(strcmp(labs, 'veog'));
+if isempty(vIdx)
+    % tolerant match: anything starting with 'v' + eog
+    vIdx = find(strncmp(labs, 'veog', 4));
+end
+if isempty(vIdx)
+    warning('No VEOG channel found; blink detection skipped.');
+    return
+end
+veog = double(D.data(vIdx(1),:));
+
+blinkThreshUv  = 100;   % uV; Galea VEOG blinks are far larger than this
+blinkMinDur_ms = 50;
+blinkMaxDur_ms = 400;
+
+above     = abs(veog) > blinkThreshUv;
+on        = find(diff([false above]) == 1);
+off       = find(diff([above false]) == -1);
+nSamp     = min(numel(on), numel(off));
+dur       = (off(1:nSamp) - on(1:nSamp) + 1) / D.srate * 1000;   % ms
+keep      = dur >= blinkMinDur_ms & dur <= blinkMaxDur_ms;
+blinkOns  = on(keep);
+
+nBlinks   = numel(blinkOns);
+ratePerMin = nBlinks / max(D.xmax/60, eps);
+fprintf('  blinks detected on VEOG: %d (%.1f / min)\n', nBlinks, ratePerMin);
+EEG.etc.galea.EOG.etc.blinks_n    = nBlinks;
+EEG.etc.galea.EOG.etc.blinks_rate = ratePerMin;
+EEG.etc.galea.EOG.etc.blinks_samp = blinkOns;
+EEG.etc.galea.EOG.etc.blink_thresh_uV = blinkThreshUv;
+
+if g.viseog
+    galea_plot_eog(EEG.etc.galea.EOG);
+end
+end
+
+% ---------------------------------------------------------------------------
+function EEG = galea_process_eda(EEG, g)
+% ElectroDermal Activity (skin conductance). Bandpass 0.01-1 Hz as in the
+% analysis pipeline, then optionally the cvxEDA tonic/phasic decomposition.
 %
-% EDA follows the published pipeline (0.01-1 Hz, downsampled to 8 Hz; a 0.05 Hz
-% high-pass isolates the phasic component). EMG and IMU settings are sensible
-% defaults rather than a validated pipeline - note the Aux stream is only 50 Hz,
-% so EMG here is a coarse activity index, not a conventional EMG measurement.
+% cvxEDA is solved on a fixed 8 Hz copy of the signal. Literature check
+% (2026-09-21): Greco et al. 2015 (the cvxEDA paper) fixes no rate - the
+% model's information content is far below that (tonic spectrum < 0.05 Hz,
+% knots every 10 s; SCR rise times ~1 s). Benchmarks (Ait-Ouarab et al. 2016,
+% compressed-sensing decomposition paper; Mahdiani 2015; Ledalab docs) put
+% the useful range at 4-10 Hz: 4 Hz captures SCR timing, 8-10 Hz is the
+% ceiling where decomposition quality stops improving. 8 Hz sits in that
+% band, matches the Empatica-class wearables, and keeps the solver fast.
+% The filtered full-rate signal is what gets stored back; only the
+% decomposition runs on the 8 Hz copy.
+
+if ~isfield(EEG.etc,'galea') || ~isfield(EEG.etc.galea,'EDA') || ...
+        isempty(EEG.etc.galea.EDA) || EEG.etc.galea.EDA.nbchan == 0
+    disp('No EDA stream in this recording; skipping.');
+    return
+end
+
+D = EEG.etc.galea.EDA;
+raw = D;
+fprintf('EDA: %.3f-%.2f Hz\n', g.edalocut, g.edahicut);
+D = pop_eegfiltnew(D, 'hicutoff', g.edahicut);
+D = pop_eegfiltnew(D, 'locutoff', g.edalocut);
+
+if g.edaphasic
+    if ~exist('cvxEDA','file')
+        p = fileparts(mfilename('fullpath'));
+        addpath(fullfile(p, 'functions'));
+    end
+    if ~exist('cvxEDA','file')
+        warning('cvxEDA not on the path (functions/cvxEDA.m); tonic/phasic skipped.');
+    else
+        fprintf('cvxEDA tonic/phasic decomposition (at 8 Hz)...\n');
+        E8 = pop_resample(D, 8);
+        y  = zscore(double(E8.data(1,:))');      % cvxEDA expects a normalised column
+        delta = 1 / E8.srate;
+        % Tuned on the study recordings (galea_pipeline_v5_eda.m):
+        % tau0=2, tau1=0.7, knots every 10 s, alpha=5e-3, gamma=0.01,
+        % quadprog, linear baseline correction.
+        [r, p_, t, ~, ~, e] = cvxEDA(y, delta, 2, 0.7, 10, 5e-3, 0.01, [], 2);
+        % store back on the 8 Hz time base, and resample the components onto
+        % the full-rate time base so both views line up
+        E8.etc.eda_phasic = r';
+        E8.etc.eda_tonic  = t';
+        E8.etc.eda_driver = p_';                  % sparse SMNA driver
+        E8.etc.eda_resid  = e';
+        E8.etc.eda_full_rate = false;
+        D.etc.eda_phasic = resample(r', D.srate, E8.srate);
+        D.etc.eda_tonic  = resample(t', D.srate, E8.srate);
+        D.etc.eda_resample_hz = 8;
+        disp('  tonic and phasic stored in .etc.eda_tonic / .etc.eda_phasic (8 Hz)');
+        if g.viscvx && usejava('desktop')
+            galea_plot_eda(E8);
+        end
+    end
+end
+
+EEG.etc.galea.EDA = D;
+
+if g.viseda && usejava('desktop')
+    figure('Color','w','Name','EDA - raw (grey) vs processed');
+    tt = (0:D.pnts-1) / D.srate;
+    tr = (0:raw.pnts-1) / raw.srate;
+    subplot(2,1,1); hold on
+    plot(tr, raw.data(1,:), 'Color',[.65 .65 .65], 'LineWidth',0.8, 'DisplayName','raw');
+    plot(tt, D.data(1,:), 'Color',[0.85 0.33 0.10], 'LineWidth',1.4, 'DisplayName','processed');
+    legend('Location','best', 'FontSize',9, 'Box','off');
+    ylabel('EDA', 'FontWeight','bold', 'FontSize',11);
+    set(gca,'FontSize',10, 'FontWeight','bold', 'Box','on', 'TickDir','out', 'Layer','top');
+    title('Skin conductance, raw vs processed');
+    if isfield(D.etc,'eda_phasic')
+        subplot(2,1,2); hold on
+        t8 = (0:size(D.etc.eda_tonic,2)-1) / D.srate;
+        plot(t8, D.etc.eda_tonic,  'Color',[0.85 0.33 0.10], 'LineWidth',1.4, 'DisplayName','tonic (cvxEDA)');
+        plot(t8, D.etc.eda_phasic, 'Color',[0.11 0.62 0.46], 'LineWidth',1.0, 'DisplayName','phasic (cvxEDA)');
+        legend('Location','best', 'FontSize',9, 'Box','off');
+        ylabel('a.u.', 'FontWeight','bold', 'FontSize',11);
+        set(gca,'FontSize',10, 'FontWeight','bold', 'Box','on', 'TickDir','out', 'Layer','top');
+        title('Tonic / phasic components');
+    end
+    xlabel('Time (s)', 'FontWeight','bold', 'FontSize',11);
+    axH = findall(gcf,'Type','axes');
+    try, linkaxes(axH); catch, end
+end
+end
+
+% ---------------------------------------------------------------------------
+function EEG = galea_process_stream(EEG, name, g)
+% EMG and IMU. Each is filtered in its own band, optionally given a derived
+% channel, and stored back in EEG.etc.galea. They are not merged into the EEG
+% dataset: the sampling rates and units differ. (EDA and EOG have their own
+% dedicated functions above.)
+%
+% EMG settings are sensible defaults rather than a validated pipeline - note
+% the Aux stream is only 50 Hz, so EMG here is a coarse activity index, not a
+% conventional EMG measurement.
 
 if ~isfield(EEG.etc,'galea') || ~isfield(EEG.etc.galea, name) || isempty(EEG.etc.galea.(name))
     disp(sprintf('No %s stream in this recording; skipping.', name));
@@ -762,29 +952,18 @@ if D.nbchan == 0, return; end
 raw = D;
 
 switch name
-    case 'EDA'
-        disp(sprintf('EDA: %.3f-%.2f Hz, downsample to %g Hz', g.edalocut, g.edahicut, g.edaresample));
-        D = pop_eegfiltnew(D, 'hicutoff', g.edahicut);
-        D = pop_eegfiltnew(D, 'locutoff', g.edalocut);
-        if g.edaresample > 0 && g.edaresample ~= D.srate
-            D = pop_resample(D, g.edaresample);
-        end
-        if g.edaphasic
-            P = pop_eegfiltnew(D, 'locutoff', 0.05);   % phasic = fast component
-            D.etc.eda_phasic = P.data;
-            D.etc.eda_tonic  = D.data - P.data;
-            disp('  tonic and phasic stored in .etc.eda_tonic / .etc.eda_phasic');
-        end
-        vis = g.viseda;
-
     case 'EMG'
-        disp(sprintf('EMG: high-pass %g Hz', g.emglocut));
+        msg = sprintf('EMG: high-pass %g Hz', g.emglocut);
+        if g.emghicut > 0, msg = [msg sprintf(', low-pass %g Hz', g.emghicut)]; end
+        disp(msg);
         D = pop_eegfiltnew(D, 'locutoff', g.emglocut);
+        if g.emghicut > 0
+            D = pop_eegfiltnew(D, 'hicutoff', g.emghicut);
+        end
         if g.emgenvelope
-            D.data = abs(D.data);                       % rectify
-            win = max(1, round(0.1 * D.srate));         % 100 ms moving average
-            D.data = movmean(D.data, win, 2);
-            disp('  rectified and 100 ms envelope applied');
+            env = movmean(abs(double(D.data)), max(1, round(0.1 * D.srate)), 2);
+            D.etc.emg_envelope = env;   % kept separately: the stored EMG stays unrectified
+            disp('  100 ms envelope stored in .etc.emg_envelope');
         end
         vis = g.visemg;
 
@@ -799,7 +978,7 @@ switch name
                 D.nbchan = size(D.data,1);
                 D.chanlocs(end+1).labels = 'ACC_MAG';
                 D = eeg_checkset(D);
-                disp('  ACC_MAG channel added');
+                disp('  ACC_MAG channel added (head-motion metric; see help)');
             end
         end
         vis = g.visimu;
@@ -808,14 +987,15 @@ end
 EEG.etc.galea.(name) = D;
 
 if vis && usejava('desktop')
-    % Uniform styling across EDA / EMG / IMU: one panel per channel, raw vs
-    % processed, legend on the first panel, bold 11-pt labels, box on, no
-    % grid, and a per-panel y range that clips extreme outliers so the shape
-    % of the signal stays readable (full range in the axis tooltip).
+    % Uniform styling across EMG / IMU: one panel per channel (all of them for
+    % IMU, so ACC_MAG is shown alongside its axes), raw vs processed, legend
+    % on the first panel, bold 11-pt labels, box on, no grid, and a per-panel
+    % y range that clips extreme outliers so the shape of the signal stays
+    % readable (full range in the axis tooltip).
     figure('Color','w','Name',[name ' - raw (grey) vs processed']);
     tt = (0:D.pnts-1) / D.srate;
     tr = (0:raw.pnts-1) / raw.srate;
-    n = min(D.nbchan, 4);
+    n = D.nbchan;
     for k = 1:n
         subplot(n,1,k); hold on
         if k <= raw.nbchan
@@ -824,6 +1004,10 @@ if vis && usejava('desktop')
         end
         plot(tt, D.data(k,:), 'Color',[0.85 0.33 0.10], 'LineWidth',1.4, ...
             'DisplayName','processed');
+        if strcmp(name,'EMG') && isfield(D.etc,'emg_envelope') && k <= size(D.etc.emg_envelope,1)
+            plot(tt, D.etc.emg_envelope(k,:), 'Color',[0 0.45 0.74], 'LineWidth',1.6, ...
+                'DisplayName','envelope (100 ms)');
+        end
         if k == 1, legend('Location','best', 'FontSize',9, 'Box','off'); end
         ylabel(D.chanlocs(k).labels, 'Interpreter','none', ...
             'FontWeight','bold', 'FontSize',11);
@@ -837,6 +1021,9 @@ if vis && usejava('desktop')
         lo = prctile(allv, 1); hi = prctile(allv, 99);
         pad = 0.1 * max(hi - lo, eps);
         ylim([lo - pad, hi + pad]);
+        if strcmp(name,'IMU') && strcmpi(D.chanlocs(k).labels, 'ACC_MAG')
+            ylabel('ACC\_MAG (g, head motion)', 'FontWeight','bold', 'FontSize',11);
+        end
     end
     xlabel('Time (s)', 'FontWeight','bold', 'FontSize',11);
     axH = findall(gcf,'Type','axes');

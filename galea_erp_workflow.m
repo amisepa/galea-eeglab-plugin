@@ -73,7 +73,9 @@ for k = 1:numel(conds)
     % epochs that survived rejection
     trimERP = zeros(SET.nbchan, numel(times));
     for iCh = 1:SET.nbchan
-        trimERP(iCh,:) = trimmean(SET.data(iCh,:,:), 20, 2);
+        % dim 3 = trials. Averaging over dim 2 would collapse TIME, not
+        % trials, and the assignment below would then be a size mismatch.
+        trimERP(iCh,:) = trimmean(SET.data(iCh,:,:), 20, 3);
     end
     m  = mean(trimERP, 1);                          % across channels
     se = std(trimERP, 0, 1) / sqrt(SET.nbchan);
@@ -85,7 +87,7 @@ for k = 1:numel(conds)
         'DisplayName', sprintf('%s (%g trials, 20%% trimmed)', conds{k}, numel(idx)));
 end
 xline(0,'k:'); yline(0,'k:');
-xlabel('Time (s)'); ylabel('Amplitude (\muV)');
+xlabel('Time (ms)'); ylabel('Amplitude (\muV)');
 title(sprintf('Condition ERPs, 20%% trimmed mean +/- SEM across %g channels (one participant)', EEG.nbchan));
 legend('Location','best'); box on; set(gca,'TickDir','out');
 fprintf('Condition ERP plot: %s\n', strjoin(conds, ' vs '));

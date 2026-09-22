@@ -22,11 +22,13 @@ S = struct('file','', 'path','', 'EEG',[], 'ok',false, 'savePath','', 'eegRate',
 
 W = 860;
 scr = get(0,'ScreenSize');
-H = 672;                              % fixed, roomy: no cropping anywhere
+H = 720;                              % fixed, roomy: no cropping anywhere
 H = min(H, scr(4) - 80);
 f = figure('Name','Galea', 'NumberTitle','off', 'MenuBar','none', 'ToolBar','none', ...
     'Resize','off', 'Color',c.back, 'WindowStyle','modal', ...
     'Position',[(scr(3)-W)/2 max(40,(scr(4)-H)/2) W H]);
+
+RIGHT = 838;                          % right edge shared by the rules and the buttons
 
 % ---------- header ----------
 logo = fullfile(fileparts(mfilename('fullpath')), 'figures', 'galea_headset.png');
@@ -49,125 +51,139 @@ uicontrol(f,'style','text','string', ...
     'Galea is a headset by OpenBCI (openbci.com), integrated into a Varjo Aero HMD.', ...
     'horizontalalignment','left','fontangle','italic','fontsize',8, ...
     'backgroundcolor',c.back,'foregroundcolor',c.text, ...
-    'position',[128 H-102 620 18]);
+    'position',[128 H-104 620 22]);
 
 % ---------- 1. load ----------
-y = H - 140;
+y = H - 136;
 lbl('1.  Load data', [22 y 300 24], 'fontweight','bold','fontsize',11);
-y = y - 26;
+y = y - 34;
 lbl(['Select the main .txt file only. Its OpenBCI-RAW-Aux-*.txt twin in the same ' ...
-     'folder is loaded automatically.'], [22 y 560 32]);
-
-hLoad = uicontrol(f,'style','pushbutton','string','Select file...','position',[620 y+2 140 30], ...
-    'backgroundcolor',c.btn,'callback',@(~,~) onSelect());
+     'folder is loaded automatically.'], [22 y 660 22]);
+uicontrol(f,'style','pushbutton','string','Select file...', ...
+    'position',[RIGHT-140 y-6 140 30], 'backgroundcolor',c.btn,'callback',@(~,~) onSelect());
 y = y - 26;
 hFile = uicontrol(f,'style','text','string','no file selected','fontangle','italic', ...
     'horizontalalignment','left','backgroundcolor',c.back,'foregroundcolor',[.35 .1 .1], ...
-    'position',[22 y 780 20]);
+    'position',[22 y RIGHT-22 20]);
 
 % ---------- 2. process ----------
-y = y - 40;
+y = y - 38;
 hDo = uicontrol(f,'style','checkbox', ...
     'string','2.  Process using the plugin''s custom methods (see Cannard 2026)', ...
-    'value',0,'fontweight','bold','fontsize',11,'position',[22 y 560 24], ...
+    'value',0,'fontweight','bold','fontsize',11,'position',[22 y 620 24], ...
     'backgroundcolor',c.back,'foregroundcolor',c.text,'callback',@(~,~) toggle());
 
 procKids = gobjects(0);    % everything gated by the "2. Process" master box
 
 % ---- trim (common to every signal) ----
-y = y - 32; sepline(y+18);
+% The section rule sits at the title's mid-height and runs the full width; the
+% title's opaque background masks the part behind it. Nothing else may share
+% this row, or the rule would run through it.
+y = y - 38; sepline(y+11);
 sec('Trim (all signals)', [22 y 200 22]);
-lbl('pad (s):', [250 y+2 45 20]);
-hTrim = edt('3',[300 y+2 60 24]); procKids(end+1) = hTrim;
+y = y - 34;
+procKids(end+1) = lbl('Pad (s):', [40 y 60 20]);
+hTrim = edt('3',[104 y-2 60 24]); procKids(end+1) = hTrim;
 y = y - 26;
-lbl(['Data before the first event and after the last event, plus this pad, is removed. ' ...
-     'Applies to the EEG and ALL auxiliary signals (PPG, EDA, EMG, IMU). 0 = keep everything.'], ...
-    [40 y 760 30], 'fontangle','italic','fontsize',8);
+% Kept to ONE line on purpose: the line height here is 20px, so a wrapped
+% second line needs a 40px box and pushes the whole window down. Measured
+% width of this wording is ~777px in a 796px box.
+procKids(end+1) = lbl(['Data before the first event and after the last event, plus this pad, ' ...
+     'is removed, from the EEG and ALL auxiliary signals (PPG, EDA, EMG, IMU). ' ...
+     '0 = keep everything.'], [40 y 796 22], 'fontangle','italic','fontsize',8);
 
 % ---- processing parameters (separate dialog: EEG + other signals) ----
-y = y - 30;
+y = y - 36;
 hParams = uicontrol(f,'style','pushbutton','string','Preprocessing parameters (EEG, PPG, EDA, EMG, IMU)...', ...
     'position',[40 y 560 28],'backgroundcolor',c.btn,'callback',@(~,~) openParams());
 procKids(end+1) = hParams;
-hRates = lbl('detected rates: -', [40 y-26 760 20], 'fontangle','italic','fontsize',8);
+y = y - 24;
+hRates = lbl('detected rates: -', [40 y 796 22], 'fontangle','italic','fontsize',8);
 procKids(end+1) = hRates;
 procOpt = [];    % full option set returned by the parameters dialog ([] = defaults)
 
 % ---------- Continuous / ERP ----------
-y = y - 64; sepline(y+18);
+y = y - 38; sepline(y+11);
 sec('Data type', [22 y 200 22]);
-y = y - 28;
+y = y - 34;
 hCont = uicontrol(f,'style','radiobutton','string','Continuous data (resting state, spectra)', ...
-    'value',1,'position',[40 y 400 22], 'backgroundcolor',c.back,'foregroundcolor',c.text, ...
+    'value',1,'position',[40 y 420 22], 'backgroundcolor',c.back,'foregroundcolor',c.text, ...
     'callback',@(~,~) toggleMode());
 hErp  = uicontrol(f,'style','radiobutton','string','ERP data (segment, clean, average)', ...
-    'value',0,'position',[40 y-26 400 22], 'backgroundcolor',c.back,'foregroundcolor',c.text, ...
+    'value',0,'position',[40 y-26 420 22], 'backgroundcolor',c.back,'foregroundcolor',c.text, ...
     'callback',@(~,~) toggleMode());
 procKids = [procKids, hCont, hErp];
 
-% --- continuous-only controls (own rows, below the radios) ---
-y = y - 34;
+% The continuous and ERP blocks deliberately start on the SAME row: only one of
+% the two is ever visible, so stacking them keeps the window short. Every
+% control of a block - static labels included - must be collected in ck / ek,
+% or toggleMode cannot hide it and the two blocks overprint each other.
+yBlock = y - 60;
+
+% --- continuous-only controls ---
 ck = gobjects(0);
-lbl('2nd ASR pass, threshold (0 = skip):', [60 y 260 20]);
-hAsr2 = edt('0', [330 y+2 60 24]);
+ck(end+1) = lbl('2nd ASR pass, threshold (0 = skip):', [60 yBlock 260 20]);
+hAsr2 = edt('0', [330 yBlock-2 60 24]);
 ck(end+1) = hAsr2;
-lbl('mode:', [400 y 40 20]);
-hAsr2Mode = uicontrol(f,'style','popupmenu','position',[440 y 130 24],'backgroundcolor',c.btn, ...
+ck(end+1) = lbl('mode:', [406 yBlock 45 20]);
+hAsr2Mode = uicontrol(f,'style','popupmenu','position',[454 yBlock-2 130 24],'backgroundcolor',c.btn, ...
     'string',{'reconstruct','remove'},'value',1, 'tooltipstring', ...
     ['reconstruct: flagged segments are interpolated (default, safest for ' ...
      'continuous data). remove: the segments are deleted.']);
 ck(end+1) = hAsr2Mode;
-y = y - 28;
 hSpectra = uicontrol(f,'style','checkbox', ...
     'string','Plot power spectra of the whole recording (1-70 Hz) at the end', ...
-    'value',0,'position',[60 y 520 22],'backgroundcolor',c.back,'foregroundcolor',c.text);
+    'value',0,'position',[60 yBlock-31 520 22],'backgroundcolor',c.back,'foregroundcolor',c.text);
 ck(end+1) = hSpectra;
 
-% --- ERP-only controls (own rows, below the continuous block) ---
+% --- ERP-only controls, on the same rows ---
 ek = gobjects(0);
-yE = y;
-lbl('Epoch window (s):', [60 yE 140 20]);
-hEpWin = edt('[-1.5 1.5]', [200 yE 120 24]);
+yE = yBlock;
+ek(end+1) = lbl('Epoch window (s):', [60 yE 140 20]);
+hEpWin = edt('[-1.5 1.5]', [204 yE-2 120 24]);
 ek(end+1) = hEpWin;
-yE = yE - 28;
-hBtOn = chk('Reject bad trials', 0, [60 yE 180 22]);
-lbl('sensitivity:', [250 yE+2 90 20]);
-hBtMethod = uicontrol(f,'style','popupmenu','position',[345 yE 200 24], ...
+yE = yE - 30;
+hBtOn = chk('Reject bad trials', 0, [60 yE-1 180 22]);
+ek(end+1) = hBtOn;
+ek(end+1) = lbl('sensitivity:', [250 yE 90 20]);
+hBtMethod = uicontrol(f,'style','popupmenu','position',[345 yE-2 200 24], ...
     'backgroundcolor',c.btn, 'string',{'conservative (mean)','medium (median)','aggressive (Grubbs)'}, ...
     'value',1, 'tooltipstring', ...
     ['conservative: mean-based outlier criterion, flags the fewest trials (default). ' ...
     'medium: median-based. aggressive: Grubbs outlier test, flags the most. ' ...
     'Amplitude and high-frequency-residual outliers across epochs (find_badTrials).']);
-ek(end+1) = hBtOn; ek(end+1) = hBtMethod;
-yE = yE - 28;
-lbl('Plot condition ERPs:', [60 yE 150 20]);
-hCond = uicontrol(f,'style','popupmenu','position',[220 yE 440 24],'backgroundcolor',c.btn, ...
-    'string',{'(select a file to list its events)'}, 'enable','off', ...
+ek(end+1) = hBtMethod;
+yE = yE - 30;
+ek(end+1) = lbl('Plot condition ERPs:', [60 yE 150 20]);
+hCond = uicontrol(f,'style','popupmenu','position',[220 yE-2 440 24],'backgroundcolor',c.btn, ...
+    'string',{'(select a file to list its events)'}, ...
     'tooltipstring','Condition of interest for the ERP plot. The list comes from the markers in the selected file.');
 ek(end+1) = hCond;
-yE = yE - 28;
-hEegPlot = chk('Also plot EEG before / after cleaning', 1, [60 yE 420 22]);
-ek(end+1) = hEegPlot;
+% NB: "plot EEG before / after cleaning" lives in the parameters dialog
+% (galea_process_gui, 'viseeg'). It used to be duplicated here and the copy was
+% never read, so the two could disagree. One owner only.
 
-% the Output section starts below whichever block is lower (ERP is)
-y = yE - 20;
+% both blocks are gated by the master box as well
+procKids = [procKids, ck, ek];
 
 % ---------- output ----------
-sepline(y+18);
-y = y - 26;
+% yE is the last ERP row; the ERP block is the taller of the two, so starting
+% the Output section from it clears both.
+y = yE - 16; sepline(y);
+y = y - 32;
 hSave = chk('Save the processed dataset to a .set file when done', 0, [40 y 430 24]);
 hSaveFile = uicontrol(f,'style','pushbutton','string','Save as...', ...
-    'position',[660 y-2 118 26],'backgroundcolor',c.btn, 'callback',@(~,~) onPickSave());
-hSavePath = lbl('', [40 y-22 780 18], 'fontangle','italic','fontsize',8);
+    'position',[RIGHT-118 y-2 118 26],'backgroundcolor',c.btn, 'callback',@(~,~) onPickSave());
+hSavePath = lbl('', [40 y-24 796 22], 'fontangle','italic','fontsize',8);
 S.savePath = '';
 procKids = [procKids, hSave, hSaveFile, hSavePath];
 
 % ---------- buttons ----------
 uicontrol(f,'style','pushbutton','string','Help','position',[22 18 80 30], ...
     'backgroundcolor',c.btn,'callback','pophelp(''pop_galea'');');
-uicontrol(f,'style','pushbutton','string','Cancel','position',[W-210 18 85 30], ...
+uicontrol(f,'style','pushbutton','string','Cancel','position',[RIGHT-198 18 85 30], ...
     'backgroundcolor',c.btn,'callback','close(gcbf)');
-hRun = uicontrol(f,'style','pushbutton','string','Run','position',[W-115 18 93 30], ...
+hRun = uicontrol(f,'style','pushbutton','string','Run','position',[RIGHT-93 18 93 30], ...
     'fontweight','bold','backgroundcolor',c.btn,'enable','off','callback',@(~,~) onRun());
 
 toggle();
@@ -319,7 +335,19 @@ end
         else
             opt = procOpt;
         end
-        if isfinite(S.eegRate) && opt.resample <= 0, opt.resample = 0; end %#ok<STRNU>
+        % The main window owns three parameters that are NOT in the
+        % parameters dialog: the common trim pad, and (continuous only) the
+        % second ASR pass. Read them here or the controls do nothing.
+        trimPad = str2double(get(hTrim,'string'));
+        if isfinite(trimPad) && trimPad >= 0, opt.trim = trimPad; end
+        if logical(get(hCont,'value'))
+            opt.asr2 = asr2Value();
+            modes = get(hAsr2Mode,'string');
+            opt.asr2mode = modes{get(hAsr2Mode,'value')};
+        else
+            opt.asr2 = 0;                 % the 2nd pass is a continuous-data step
+            opt.asr2mode = 'reconstruct';
+        end
 
         try
             % via pop_galea_import so the non-EEG streams land in EEG.etc.galea
@@ -362,13 +390,12 @@ end
         if isErp
             opt.trimWindow = str2num(get(hEpWin,'string')); %#ok<ST2NM> % e.g. [-1.5 1.5]
             condList = get(hCond,'string');
-            if logical(get(hCont,'value')) || get(hCond,'value') <= 1
+            if get(hCond,'value') <= 1
                 opt.plotConds = {};
             else
-                opt.plotConds = {condList{get(hCond,'value')}};
+                opt.plotConds = condList(get(hCond,'value'));
             end
             S.btOn = logical(get(hBtOn,'value'));
-            btList = get(hBtMethod,'string');
             btNames = {'mean','median','grubbs'};
             S.btMethod = btNames{get(hBtMethod,'value')};
             D = galea_erp_workflow(D, opt, S);
