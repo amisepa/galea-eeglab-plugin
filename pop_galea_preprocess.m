@@ -545,8 +545,20 @@ try
         'vis_cleaning', double(g.visppg), 'vis_outputs', double(g.visppg), ...
         'save', 0);
     EEG.etc.galea.PPG = PPG;
-    if isfield(PPG.etc,'features')
-        EEG.etc.galea.HRV = PPG.etc.features;
+    % BrainBeats 1.5+ stores its output in .brainbeats (older versions: .etc.features)
+    H = [];
+    if isfield(PPG,'brainbeats') && isfield(PPG.brainbeats,'features') && isfield(PPG.brainbeats.features,'HRV')
+        H = PPG.brainbeats.features.HRV;
+        if isfield(PPG.brainbeats,'preprocessings')
+            pp = PPG.brainbeats.preprocessings;
+            if isfield(pp,'NN'),   H.NN = pp.NN;         end
+            if isfield(pp,'NN_times'), H.NN_times = pp.NN_times; end
+        end
+    elseif isfield(PPG.etc,'features')
+        H = PPG.etc.features;
+    end
+    if ~isempty(H)
+        EEG.etc.galea.HRV = H;
         fprintf('  HRV features stored in EEG.etc.galea.HRV\n');
     end
     % BrainBeats already drew plot_NN (signal + detected/corrected beats +

@@ -10,7 +10,7 @@ function vers = eegplugin_galea(fig, trystrs, catchstrs)
 %
 % Cedric Cannard, 2026
 
-vers = 'galea1.7';
+vers = 'galea1.7.1';
 
 % no arguments: just report the version (pop_galea_import stamps it on the data)
 if nargin < 3, return; end
