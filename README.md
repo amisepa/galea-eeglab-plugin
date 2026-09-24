@@ -34,8 +34,9 @@ and opens the processing parameters.
 ![Main window](figures/gui_main.png)
 
 **Processing parameters**: one section per signal, every signal ticked by
-default. The ERP section (epoch window, bad-trial rejection, condition plot)
-appears for ERP data only. **Run** starts the processing. Shown with the
+default. Below the EEG options sits a section for the chosen data type:
+Continuous (2nd ASR pass, power spectra) or ERP (epoch window, the events to
+epoch around, bad-trial rejection, the conditions to plot). **Run** starts the processing. Shown with the
 settings of Cannard & Yeşilbaş (2026).
 
 ![Processing parameters](figures/gui_preprocess.png)
@@ -67,9 +68,8 @@ assumptions, and this plugin handles each one.
   - *Trim* — drops the head and tail of the recording around the first and
     last event, for the EEG **and** all auxiliary signals, each at its own
     sampling rate.
-  - *Downsample* — with a rate-aware divide-by-1/2/4 helper (detected rate is
-    shown next to the field; dividing avoids resampling artefacts at
-    non-integer ratios).
+  - *Downsample* — keep the detected rate, or divide it by 2 or 4 (integer
+    ratios avoid resampling artefacts).
   - *Minimum-phase causal bandpass* — keeps the pre-stimulus period free of
     post-stimulus leakage. A zero-phase filter smears post-stimulus activity
     backwards in time and can manufacture anticipatory effects that are
@@ -80,12 +80,15 @@ assumptions, and this plugin handles each one.
     assumes enough neighbours for its correlation criterion to be meaningful;
     with 12 electrodes it does not. This uses a sliding-window combination of
     amplitude outliers and inter-channel correlation, with explicit thresholds.
-  - *ASR* with remove (default) or reconstruct mode, plus an optional second,
-    stricter pass after ICA.
+  - *ASR* with remove (default) or reconstruct mode; for continuous data, an
+    optional second, stricter pass after ICA (threshold 10) and a power
+    spectrum of the cleaned recording.
   - *ICA* with ocular-component removal (eyes-open tasks only).
-  - *ERP epoching* (ERP data only): epoch window, bad-trial rejection
-    (mean, median or Grubbs outlier criterion), and a condition plot
-    (20% trimmed-mean ERP +/- SEM with its single-trial ERP image).
+  - *ERP epoching* (ERP data only): epoch window, the events to epoch
+    around, bad-trial rejection (mean, median or Grubbs outlier criterion),
+    and any number of conditions overlaid in one plot (20% trimmed mean with
+    its 95% confidence interval, one color each, plus each condition's
+    single-trial ERP image).
   - *Other signals*, in the same window: EOG with blink detection, PPG
     through BrainBeats with RR artefact correction and HRV features, EDA
     tonic/phasic, EMG envelope, IMU magnitude.
@@ -116,7 +119,8 @@ run `eegh` prints commands you can paste into a script:
 ```matlab
 EEG = pop_galea_import('montage','custom', 'filename','Sample-Data-OpenBCI-RAW.txt', 'filepath', pwd);
 EEG = pop_galea_preprocess(EEG, 'locut',0.5, 'hicut',30, 'causal',true, 'asr',100, 'ica',true);
-EEG = galea_erp_workflow(EEG, 'epochwin',[-3 3], 'rejtrials',true, 'plotconds',{'tire_pop'});
+EEG = galea_erp_workflow(EEG, 'epochwin',[-3 3], 'epochevents',{'no_tire_pop','tire_pop'}, ...
+    'rejtrials',true, 'plotconds',{'no_tire_pop','tire_pop'});
 ```
 
 `EEG = pop_galea;` opens the main window from the command line.
@@ -128,6 +132,9 @@ the same option names (see `help pop_galea_preprocess`).
 
 - `find_badTrials.m` — epoch rejection by amplitude and high-frequency
   residual, using a mean-based outlier criterion.
+- `galea_trimci.m` — trimmed mean and its Tukey-McLaughlin confidence
+  interval (Wilcox's `trimci`; matches `scipy.stats.mstats.trimmed_mean_ci`),
+  used by `galea_plot_conditions.m` for the condition overlay.
 
 ## Citation
 

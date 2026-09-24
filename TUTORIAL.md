@@ -80,9 +80,8 @@ not need. **Run** starts the processing.
   - *Trim pad* — removes data before the first event and after the last
     event, plus a pad (default 1 s). Applies to the EEG *and* all auxiliary
     signals. `0` keeps everything.
-  - *Downsample* — a dropdown that lists the detected rate first ("keep
-    current rate"), then rate/2 and rate/4 (dividing avoids resampling
-    artefacts at non-integer ratios), then common fixed rates.
+  - *Downsample* — keep the current rate (default), or divide it by 2 or 4
+    (integer ratios avoid resampling artefacts).
   - *Bandpass* — 0.5–30 Hz, **minimum-phase causal by default** (the setting
     of the Cannard & Yeşilbaş 2026 pipeline, safe for pre-stimulus analyses: a zero-phase filter
     smears post-stimulus activity backwards in time and can manufacture an
@@ -101,15 +100,24 @@ not need. **Run** starts the processing.
     segments while leaving ocular activity, so ICA can separate the blink
     source cleanly.
   - *ICA, remove the ocular component* — eyes-open tasks only.
-  - *ASR 2nd pass (after ICA)* — optional stricter pass (default off).
-  - Tick **Plot EEG before / after** to see what was done, and **Plot power
-    spectra** for a 1-70 Hz spectrum of the cleaned recording.
-- **ERP** (ERP data only) — *Epoch window* in seconds around every event
-  marker (default `[-1.5 1.5]`), *Reject bad trials* with a conservative
-  (mean), medium (median) or aggressive (Grubbs) outlier criterion, and
-  *Plot condition ERPs* for one event type (20% trimmed-mean ERP +/- SEM and
-  its single-trial ERP image). No baseline is removed, so the pre- and
-  post-stimulus periods stay comparable.
+  - Tick **Plot EEG before / after** to see what was done.
+- **Continuous** (continuous data only) — *ASR 2nd pass (after ICA)*, an
+  optional stricter pass on the cleaned data (off by default, threshold 10
+  when ticked), and **Plot power spectra** for a 1-70 Hz spectrum of the
+  cleaned recording.
+- **ERP** (ERP data only) — *Epoch window* in seconds (default `[-1.5 1.5]`),
+  *Reject bad trials* with a conservative (mean), medium (median) or
+  aggressive (Grubbs) outlier criterion, then two lists (Ctrl/Shift-click to
+  select several):
+  - *Epoch around these events* — the event markers found in the file; all
+    are selected by default.
+  - *Plot these conditions* — any of the epoched events. All selected
+    conditions are overlaid in one figure: the 20% trimmed mean across trials
+    with its 95% confidence interval shaded, one color per condition. Each
+    condition also gets its single-trial ERP image.
+
+  No baseline is removed, so the pre- and post-stimulus periods stay
+  comparable.
 - **EOG, PPG, EDA, EMG, IMU** — one section each, with its own parameters and
   plot option: blink detection, heart rate and HRV through BrainBeats,
   tonic/phasic EDA, EMG envelope, IMU head-motion magnitude.
@@ -124,7 +132,7 @@ Type `eegh` after a run to see them, for example:
 ```matlab
 EEG = pop_galea_import('montage','custom', 'filename','Sample-Data-OpenBCI-RAW.txt', 'filepath','...\sample_data');
 EEG = pop_galea_preprocess(EEG, 'trim',1, 'resample',0, 'locut',0.5, 'hicut',30, 'causal',1, ...);
-EEG = galea_erp_workflow(EEG, 'epochwin',[-3 3], 'rejtrials',1, 'rejmethod','mean', 'plotconds',{'tire_pop'});
+EEG = galea_erp_workflow(EEG, 'epochwin',[-3 3], 'epochevents',{'no_tire_pop','tire_pop'}, 'rejtrials',1, 'rejmethod','mean', 'plotconds',{'no_tire_pop','tire_pop'});
 ```
 
 Paste them into a script to rerun the same processing on other recordings

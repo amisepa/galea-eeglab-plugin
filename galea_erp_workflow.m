@@ -4,22 +4,26 @@ function [EEG, com] = galea_erp_workflow(EEG, varargin)
 %GALEA_ERP_WORKFLOW  Segment, reject bad trials, plot condition ERPs.
 %
 %   >> EEG = galea_erp_workflow(EEG, opt)
-%   >> EEG = galea_erp_workflow(EEG, 'epochwin',[-3 3], 'rejtrials',true, ...
-%                               'plotconds',{'tire_pop'})
+%   >> EEG = galea_erp_workflow(EEG, 'epochwin',[-3 3], ...
+%              'epochevents',{'no_tire_pop','tire_pop'}, 'rejtrials',true, ...
+%              'plotconds',{'no_tire_pop','tire_pop'})
 %
 % The ERP branch of pop_galea, after the continuous processing has run.
-% Segments around the markers in the file, optionally rejects bad trials
+% Segments around the chosen event markers, optionally rejects bad trials
 % (find_badTrials: amplitude + high-frequency residual outliers), and plots
-% the condition of interest as a 20% trimmed mean +/- SEM (the robust
-% summary used in the Cannard pipeline) plus its single-trial ERP image
-% (erpimage).
+% the chosen conditions overlaid in one figure (galea_plot_conditions): for
+% each condition, the 20% trimmed mean across trials with its 95% confidence
+% interval shaded, each condition in its own color, as many conditions as
+% selected, plus each condition's single-trial ERP image.
 %
 % Options, as a struct or as name/value pairs, use the galea_process_defaults
 % names (missing keys keep defaults):
-%   'epochwin'   [pre post] epoch window in s              [-1.5 1.5]
-%   'rejtrials'  reject bad trials                         [false]
-%   'rejmethod'  'mean' (conservative), 'median', 'grubbs' (aggressive) ['mean']
-%   'plotconds'  cell of event labels to plot, {} = none   [{}]
+%   'epochwin'     [pre post] epoch window in s                    [-1.5 1.5]
+%   'epochevents'  cell of event labels to epoch around, {} = all  [{}]
+%   'rejtrials'    reject bad trials                               [false]
+%   'rejmethod'    'mean' (conservative), 'median', 'grubbs' (aggressive) ['mean']
+%   'plotconds'    cell of event labels to plot, {} = none         [{}]
+%                  (each must be one of the epoched events)
 %
 % COM is the command-line equivalent, for the EEGLAB history (eegh).
 %
@@ -43,21 +47,46 @@ if numel(win) ~= 2 || any(~isfinite(win)) || win(1) >= win(2)
     win = [-1.5 1.5];
 end
 
-% ---------------- segment ----------------
+% ---------------- events to epoch around ----------------
 if isempty(EEG.event)
     fprintf('No markers in this recording: no epoching, nothing to plot.\n');
     return
 end
+% numeric codes become labels (pop_epoch and the lists below compare text)
+isNum = cellfun(@isnumeric, {EEG.event.type});
+for iE = find(isNum), EEG.event(iE).type = num2str(EEG.event(iE).type); end
 types = unique({EEG.event.type});
-% every labeled marker is a potential epoch source
-EEG = pop_epoch(EEG, types, win, 'epochinfo','yes');
-fprintf('Epoched [%g %g] s around all markers: %g epochs.\n', win(1), win(2), EEG.trials);
+types = types(~strcmpi(types, 'boundary'));      % data-break markers, not events
 
-conds = opt.plotconds;
-if ischar(conds), conds = {conds}; end
-conds = conds(~cellfun(@isempty, conds));
+evs = galea_cellstr(opt.epochevents);
+if isempty(evs)
+    evs = types;                                  % {} = every marker in the file
+else
+    missing = setdiff(evs, types);
+    if ~isempty(missing)
+        fprintf(2, 'Not in this file, ignored: %s\n', strjoin(missing, ', '));
+    end
+    evs = evs(ismember(evs, types));
+    if isempty(evs)
+        fprintf(2, 'None of the requested events is in this file: no epoching.\n');
+        return
+    end
+end
+
+conds = galea_cellstr(opt.plotconds);
+notEpoched = setdiff(conds, evs);
+if ~isempty(notEpoched)
+    fprintf(2, 'Not epoched, so not plotted: %s\n', strjoin(notEpoched, ', '));
+    conds = conds(ismember(conds, evs));
+end
+
 com = sprintf('EEG = galea_erp_workflow(EEG, %s);', vararg2str({'epochwin', win, ...
-    'rejtrials', logical(opt.rejtrials), 'rejmethod', opt.rejmethod, 'plotconds', conds}));
+    'epochevents', evs, 'rejtrials', logical(opt.rejtrials), 'rejmethod', opt.rejmethod, ...
+    'plotconds', conds}));
+
+% ---------------- segment ----------------
+EEG = pop_epoch(EEG, evs, win, 'epochinfo','yes');
+fprintf('Epoched [%g %g] s around %s: %g epochs.\n', win(1), win(2), strjoin(evs, ', '), EEG.trials);
 
 % ---------------- bad trials ----------------
 if opt.rejtrials
@@ -75,71 +104,7 @@ if opt.rejtrials
 end
 
 % ---------------- condition ERPs ----------------
-if isempty(conds)
-    return
+if ~isempty(conds)
+    galea_plot_conditions(EEG, conds);
 end
-
-% the event each epoch is time-locked to (latency 0). An epoch that merely
-% CONTAINS a condition marker is time-locked to another event, so matching
-% any marker in the window would mix other events' ERPs into the average.
-lockType = cell(1, EEG.trials);
-halfSample = 500 / EEG.srate;                      % ms
-for iE = 1:EEG.trials
-    et = EEG.epoch(iE).eventtype;
-    el = EEG.epoch(iE).eventlatency;
-    if ~iscell(et), et = {et}; end
-    if ~iscell(el), el = {el}; end
-    k0 = find(cellfun(@(x) abs(x) < halfSample, el), 1);
-    if ~isempty(k0), lockType{iE} = et{k0}; else, lockType{iE} = ''; end
-end
-
-figure('Color','w'); hold on
-cols = [0.85 0.33 0.10; 0.20 0.40 0.70; 0.00 0.62 0.45; 0.58 0.40 0.62;
-        0.93 0.69 0.13; 0.49 0.18 0.55];   % Okabe-Ito subset, cycles
-times = EEG.times;
-for k = 1:numel(conds)
-    idx = find(strcmp(lockType, conds{k}));
-    if isempty(idx)
-        fprintf('No epochs of condition %s; skipping.\n', conds{k});
-        continue
-    end
-    SET = pop_select(EEG, 'trial', idx);
-
-    % single-trial ERP image (EEGLAB erpimage): one row per trial, the
-    % condition's mean ERP underneath. It shows the trial-to-trial
-    % variability that the average hides. Plotted on the mean across
-    % channels so one image summarizes the condition.
-    try
-        meanChan = squeeze(mean(SET.data, 1));        % (time, trials)
-        figure('Color','w');
-        erpimage(meanChan, 1:size(meanChan,2), ...
-            linspace(SET.xmin*1000, SET.xmax*1000, SET.pnts), ...
-            sprintf('%s: single trials (mean across channels)', conds{k}), 5, 0, ...
-            'erp', 'on', 'cbar', 'on');
-    catch ME
-        fprintf(2, 'Single-trial ERP image failed (%s): %s\n', conds{k}, ME.message);
-    end
-
-    % per-channel trimmed mean, then across channels: robust to artefact
-    % epochs that survived rejection
-    trimERP = zeros(SET.nbchan, numel(times));
-    for iCh = 1:SET.nbchan
-        % dim 3 = trials. Averaging over dim 2 would collapse TIME, not
-        % trials, and the assignment below would then be a size mismatch.
-        trimERP(iCh,:) = trimmean(SET.data(iCh,:,:), 20, 3);
-    end
-    m  = mean(trimERP, 1);                          % across channels
-    se = std(trimERP, 0, 1) / sqrt(SET.nbchan);
-    if SET.nbchan > 1
-        fill([times fliplr(times)], [m-se fliplr(m+se)], cols(mod(k-1,6)+1,:), ...
-            'FaceAlpha',0.2, 'EdgeColor','none', 'HandleVisibility','off');
-    end
-    plot(times, m, 'Color',cols(mod(k-1,6)+1,:), 'LineWidth',1.6, ...
-        'DisplayName', sprintf('%s (%g trials, 20%% trimmed)', conds{k}, numel(idx)));
-end
-xline(0,'k:'); yline(0,'k:');
-xlabel('Time (ms)'); ylabel('Amplitude (\muV)');
-title(sprintf('Condition ERPs, 20%% trimmed mean +/- SEM across %g channels (one participant)', EEG.nbchan));
-legend('Location','best'); box on; set(gca,'TickDir','out');
-fprintf('Condition ERP plot: %s\n', strjoin(conds, ' vs '));
 end

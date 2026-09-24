@@ -54,9 +54,11 @@ function [EEG, com] = pop_galea_preprocess(EEG, varargin)
 %   'ica'      ICA, remove the ocular component     [true]
 %   'icaconfirm' ask before removing the component  [true]
 %              (command line only; the GUI always asks)
-%   'asr2'     second ASR pass after ICA, 0 = skip  [0]
+%   'asr2'     second ASR pass after ICA, 0 = skip; the GUI offers it for
+%              continuous data only, threshold 10  [0]
 %   'asr2mode' 'reconstruct' (default) or 'remove' for the second pass
-%   'plotspectra' plot pop_spectopo (1-70 Hz) at the end of EEG cleaning [false]
+%   'plotspectra' plot pop_spectopo (1-70 Hz) at the end of EEG cleaning
+%              (GUI: continuous data only) [false]
 %   'viseeg'   plot the EEG before / after          [true]
 %   'badtrials' / 'badtrialmethod' - accepted and ignored here: bad-trial
 %              rejection is applied by pop_galea AFTER epoching (find_badTrials).
@@ -136,7 +138,7 @@ g = struct('eeg',true, 'trim',1, 'resample',0, 'locut',0.5, 'hicut',30, 'causal'
 
 % Keys the parameters window carries that are not used here: its own flags
 % and the ERP options (galea_erp_workflow reads those). Accepted and ignored.
-guiOnly = {'srate','montage','erp','preprocess','epochwin','erpevents', ...
+guiOnly = {'srate','montage','erp','preprocess','epochwin','epochevents','erpevents', ...
            'rejtrials','rejmethod','plotconds','trimwindow'};
 if nargin > 1
     for i = 1:2:numel(varargin)

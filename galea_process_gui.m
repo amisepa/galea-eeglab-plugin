@@ -7,10 +7,11 @@ function out = galea_process_gui(def, EEG)
 %   >> out = galea_process_gui(def, EEG)   % EEG lets the trim row detect events
 %
 % One dialog for ALL processing parameters - EEG first (trim pad, filters,
-% bad channels, ASR 1st pass, ICA, optional 2nd ASR pass, spectra plot),
-% then, for ERP data only, the epoching options (epoch window, bad-trial
-% rejection, condition ERP plot), then the other recorded signals (EOG, PPG,
-% EDA, EMG, IMU). Every signal is ticked by default. They are not
+% bad channels, ASR, ICA), then a section for the data type chosen in the
+% main window: Continuous (optional 2nd ASR pass, power spectra) or ERP
+% (epoch window, the events to epoch around, bad-trial rejection, the
+% conditions to plot), then the other recorded signals (EOG, PPG, EDA, EMG,
+% IMU). Every signal is ticked by default. They are not
 % "peripherals": for many studies they are as or more important than the
 % EEG, so they sit in the same window with the same structure, separated by
 % horizontal rules. Each modality's "process" checkbox enables/disables its
@@ -24,8 +25,8 @@ function out = galea_process_gui(def, EEG)
 %
 % DEF holds the current values (a galea_process_defaults struct, any subset;
 % missing keys keep their defaults). DEF.srate, when present and finite, fills
-% the Downsample list with the true rate. EEG.event fills the condition list
-% of the ERP section. OUT returns the full set, or [] if cancelled.
+% the Downsample list with the true rate. EEG.event fills the event lists of
+% the ERP section. OUT returns the full set, or [] if cancelled.
 %
 % Cedric Cannard, 2026
 
@@ -45,9 +46,11 @@ scr = get(0, 'ScreenSize');
 % overlap; a too-tall window just extends past the screen bottom)
 % EEG: title 26, trim 22, polarity 22, downsample 22, bandpass+causal 22,
 %      badchan 22, corr 22, max% 22, interp 22, ASR+note 22, ICA 22,
-%      ASR2+note 22, plots 22, sep 20 = 310
-% ERP (ERP data only): title 26, epoch+bad trials 24, conditions 24,
+%      plot 22, sep 20 = 288
+% Continuous (continuous data only): title 26, ASR2+note 24, spectra 24,
 %      sep 20 = 94
+% ERP (ERP data only): title 26, epoch+bad trials 24, list labels 20,
+%      lists 86, sep 20 = 176
 % EOG: box 24, bandpass 24, plot 24, sep 20 = 92
 % PPG: box 24, bandpass+detect 24, RR label+note 22, HRV 22, sep 20 = 112
 % EDA: box 24, bandpass 24, tonic-phasic 24, plot 22, sep 20 = 114
@@ -55,10 +58,10 @@ scr = get(0, 'ScreenSize');
 % IMU: box 24, lowpass 24, ACC_MAG+plot 22 = 70
 % Notes sit beside their controls and paired checkboxes share a row, so the
 % ERP version still fits a 1080-pixel screen.
-rowsEEG   = 310;  rowsEOG = 92;  rowsPPG = 112;
+rowsEEG   = 288;  rowsEOG = 92;  rowsPPG = 112;
 rowsEDA   = 114;  rowsEMG = 92;  rowsIMU = 70;
-rowsERP   = 94 * double(logical(d.erp));
-H = 24 + 68 + rowsEEG + rowsERP + rowsEOG + rowsPPG + rowsEDA + rowsEMG + rowsIMU;
+if d.erp, rowsType = 176; else, rowsType = 94; end    % ERP or Continuous section
+H = 24 + 68 + rowsEEG + rowsType + rowsEOG + rowsPPG + rowsEDA + rowsEMG + rowsIMU;
 % never clamp: controls must never overlap; a too-tall window
 % just extends past the screen bottom, every control stays usable
 % H = min(H, scr(4) - 80);
@@ -116,9 +119,9 @@ hPol = cb('fix inverted Fp1/Fp2 disc electrodes (custom montage only)', ...
     'tooltipstring', ['ExG channels 7-8 become Fp1/Fp2 in the custom montage. Only correct ' ...
     'polarity if they were reconfigured as EEG in the Galea software when recording.']);
 
-% ---- downsample: a list, not a free box. The current rate sits on top;
-% dividing it avoids resampling artefacts at non-integer ratios. Falls back
-% to an edit box when the rate is unknown (command-line use).
+% ---- downsample: a list, not a free box: keep the current rate, or divide
+% it by 2 or 4 (integer ratios avoid resampling artefacts). Falls back to an
+% edit box when the rate is unknown (command-line use).
 dsVals = [];
 srate = NaN;
 if isfield(def, 'srate') && isfinite(def.srate) && def.srate > 0
@@ -132,15 +135,10 @@ if isnan(srate)
 else
     dsOpts = {sprintf('keep current rate (%g Hz)', srate), ...
               sprintf('%g Hz (divide by 2)', srate/2), ...
-              sprintf('%g Hz (divide by 4)', srate/4), ...
-              '128 Hz', '250 Hz', '512 Hz'};
-    dsVals = [0, srate/2, srate/4, 128, 250, 512];      % 0 = keep (no resampling)
-    if isfinite(d.resample) && d.resample > 0 && ~any(abs(dsVals - d.resample) < 0.05)
-        dsOpts{end+1} = sprintf('%g Hz (as previously set)', d.resample);
-        dsVals(end+1) = d.resample;
-    end
+              sprintf('%g Hz (divide by 4)', srate/4)};
+    dsVals = [0, srate/2, srate/4];                     % 0 = keep (no resampling)
     hRes = uicontrol(f,'style','popupmenu','position',[205 y 220 22],'backgroundcolor',c.btn, ...
-        'string',dsOpts, 'value', max(1, find(abs(dsVals - d.resample) < 0.05, 1)), ...
+        'string',dsOpts, 'value', max([1, find(abs(dsVals - d.resample) < 0.05, 1)]), ...
         'tooltipstring', ['Dividing the current rate avoids resampling artefacts at ' ...
         'non-integer ratios. "keep current rate" leaves the recording untouched.']);
 end
@@ -184,24 +182,39 @@ hIca = cb('ICA: Extract the most likely eye component (eyes-open data; visual ch
     double(d.ica), [20 y W-40 22]);
 
 y = y - 22;
-hAsr2 = cb('ASR 2nd pass (after ICA)', double(d.asr2 > 0), [20 y 180 22], ...
-    'callback', @(~,~) gateAsr2());
-hAsr2Th = ed(sprintf('%g', max(d.asr2, 5)), [205 y 60 22]);
-hAsr2Mode = uicontrol(f,'style','popupmenu','position',[275 y 130 22], ...
-    'backgroundcolor',c.btn, 'string',{'reconstruct','remove'}, ...
-    'value', find(strcmp({'reconstruct','remove'}, d.asr2mode)), ...
-    'tooltipstring', ['Stricter second pass on the cleaned data, after ICA removed the eye ' ...
-    'component. reconstruct: flagged segments are interpolated (safest, default). ' ...
-    'remove: they are deleted.']);
-txt('Stricter pass on the cleaned data (default 5).', ...
-    [415 y-2 W-435 20], 'fontangle','italic','fontsize',8);
-
-y = y - 22;
 hVisE = cb('Plot EEG before / after cleaning', double(d.viseeg), [20 y 260 22]);
-hSpectra = cb('Plot power spectra (1-70 Hz) at the end', double(d.plotspectra), ...
-    [290 y W-310 22], 'tooltipstring', 'Power spectra of the whole cleaned recording, 1-70 Hz.');
 
 y = y - 20; sep(y);
+
+% ---------------- Continuous (continuous data only) ----------------
+% A stricter 2nd ASR pass suits continuous recordings, where deleting a
+% segment loses no trial; the spectra summarise the whole cleaned recording.
+hAsr2 = []; hAsr2Th = []; hAsr2Mode = []; hSpectra = [];
+if ~d.erp
+    y = y - 26;
+    txt('Continuous', [20 y 200 24], 'fontweight','bold','fontsize',12);
+
+    y = y - 24;
+    hAsr2 = cb('ASR 2nd pass (after ICA)', double(d.asr2 > 0), [40 y 180 22], ...
+        'callback', @(~,~) gateAsr2());
+    asr2Th = d.asr2;
+    if asr2Th <= 0, asr2Th = 10; end            % threshold offered when ticked
+    hAsr2Th = ed(sprintf('%g', asr2Th), [225 y 60 22]);
+    hAsr2Mode = uicontrol(f,'style','popupmenu','position',[295 y 130 22], ...
+        'backgroundcolor',c.btn, 'string',{'reconstruct','remove'}, ...
+        'value', find(strcmp({'reconstruct','remove'}, d.asr2mode)), ...
+        'tooltipstring', ['Stricter second pass on the cleaned data, after ICA removed the eye ' ...
+        'component. reconstruct: flagged segments are interpolated (default). ' ...
+        'remove: they are deleted.']);
+    txt('Stricter pass on the cleaned data (default 10).', ...
+        [435 y-2 W-455 20], 'fontangle','italic','fontsize',8);
+
+    y = y - 24;
+    hSpectra = cb('Plot power spectra (1-70 Hz) of the cleaned recording', double(d.plotspectra), ...
+        [40 y W-70 22], 'tooltipstring', 'pop_spectopo of the whole cleaned recording, 1-70 Hz.');
+
+    y = y - 20; sep(y);
+end
 
 % ---------------- ERP (ERP data only) ----------------
 % The data type is chosen in the main window; continuous data skip this
@@ -212,7 +225,7 @@ if isfield(EEG, 'event') && ~isempty(EEG.event) && isfield(EEG.event, 'type')
     evTypes = {EEG.event.type};
     isNum = cellfun(@isnumeric, evTypes);
     evTypes(isNum) = cellfun(@num2str, evTypes(isNum), 'UniformOutput', false);
-    evTypes = unique(evTypes(~cellfun(@isempty, evTypes)));
+    evTypes = unique(evTypes(~cellfun(@isempty, evTypes) & ~strcmpi(evTypes, 'boundary')));
 end
 if d.erp
     y = y - 26;
@@ -221,8 +234,8 @@ if d.erp
     y = y - 24;
     txt('Epoch window (s):', [40 y 140 20]);
     hEpWin = ed(mat2str(d.epochwin), [185 y 90 22]);
-    set(hEpWin, 'tooltipstring', ['Start and end of each epoch, in seconds around every ' ...
-        'event marker, e.g. [-1.5 1.5].']);
+    set(hEpWin, 'tooltipstring', ['Start and end of each epoch, in seconds around each ' ...
+        'selected event, e.g. [-1.5 1.5].']);
     hRej = cb('Reject bad trials', double(d.rejtrials), [300 y 130 22], ...
         'callback', @(~,~) gateRej());
     iRej = find(strcmpi(rejKeys, d.rejmethod), 1);
@@ -233,22 +246,31 @@ if d.erp
         '(find_badTrials). conservative: mean-based criterion, flags the fewest trials ' ...
         '(default). medium: median-based. aggressive: Grubbs test, flags the most.']);
 
-    y = y - 24;
-    txt('Plot condition ERPs:', [40 y 140 20]);
+    % two lists: the events to epoch around, then the conditions to plot
+    % (only epoched events can be plotted, so the 2nd list follows the 1st).
+    % Ctrl/Shift-click selects several.
+    y = y - 20;
+    txt('Epoch around these events (Ctrl/Shift-click for several):', [40 y 340 20]);
+    txt('Plot these conditions, overlaid (none = no plot):', [400 y W-420 20]);
+
+    y = y - 86;
+    epSel = find(ismember(evTypes, galea_cellstr(d.epochevents)));
+    if isempty(epSel), epSel = 1:numel(evTypes); end   % default: every marker
+    hEv = uicontrol(f,'style','listbox','position',[40 y 340 84],'backgroundcolor',c.btn, ...
+        'string',evTypes, 'max',2, 'min',0, 'value',epSel, ...
+        'callback', @(~,~) updateConds(), ...
+        'tooltipstring', 'Event markers in this file. Epochs are cut around the selected ones.');
+    hCond = uicontrol(f,'style','listbox','position',[400 y W-420 84],'backgroundcolor',c.btn, ...
+        'string',{}, 'max',2, 'min',0, 'value',[], ...
+        'tooltipstring', ['Each selected condition: 20% trimmed mean across trials with its ' ...
+        '95% confidence interval shaded, all in one figure, one color each; plus its ' ...
+        'single-trial ERP image.']);
+    condSel = galea_cellstr(d.plotconds);          % names; kept across list updates
+    updateConds();
     if isempty(evTypes)
-        condOpts = {'(no event markers in this file)'};
-    else
-        condOpts = [{'(none)'}, evTypes];
+        set(hEv, 'string', {'(no event markers in this file)'}, 'value', [], 'enable', 'off');
+        set(hCond, 'enable', 'off');
     end
-    iCond = 1;
-    if ~isempty(d.plotconds)
-        k = find(strcmp(condOpts, d.plotconds{1}), 1);
-        if ~isempty(k), iCond = k; end
-    end
-    hCond = uicontrol(f,'style','popupmenu','position',[185 y 290 22],'backgroundcolor',c.btn, ...
-        'string',condOpts, 'value',iCond, 'tooltipstring', ['Condition plotted as a 20% ' ...
-        'trimmed-mean ERP (+/- SEM) with its single-trial ERP image. The list is the ' ...
-        'event markers in this file.']);
 
     y = y - 20; sep(y);
 end
@@ -363,7 +385,7 @@ imuKids(end+1) = hVisI;
 
 % ---------------- gating ----------------
 gateBad();
-gateAsr2();
+if ~d.erp, gateAsr2(); end
 gateAll();
 if d.erp, gateRej(); end
 
@@ -383,6 +405,15 @@ if d.erp, gateRej(); end
         % the 2nd-pass threshold and mode only act when the pass is enabled
         on = gateStr(logical(get(hAsr2,'value')));
         set([hAsr2Th hAsr2Mode], 'enable', on);
+    end
+
+    function updateConds()
+        % the plot list offers only the epoched events, keeping what was
+        % selected there (by name) when the epoch selection changes
+        old = get(hCond, 'string');
+        if ~isempty(old), condSel = old(get(hCond, 'value')); end
+        ep = evTypes(get(hEv, 'value'));
+        set(hCond, 'string', ep, 'value', find(ismember(ep, condSel)));
     end
 
     function gateAll()
@@ -419,9 +450,12 @@ uiwait(f);
                     'e.g. [-1.5 1.5].'], 'Galea', 'modal');
                 return
             end
+            if ~isempty(evTypes) && isempty(get(hEv,'value'))
+                warndlg('Select at least one event to epoch around.', 'Galea', 'modal');
+                return
+            end
         end
         asrM = get(hAsrMode,'string');
-        asr2M = get(hAsr2Mode,'string');
         detOpts = get(hDet,'string');
         out = d;
         out.polarity     = logical(get(hPol,'value'));
@@ -444,13 +478,14 @@ uiwait(f);
             out.asr      = 0;                    % unchecked = skip the 1st pass
         end
         out.asrmode      = asrM{get(hAsrMode,'value')};
-        if logical(get(hAsr2,'value'))
+        if ~d.erp && logical(get(hAsr2,'value'))
+            asr2M = get(hAsr2Mode,'string');
             out.asr2     = str2double(get(hAsr2Th,'string'));
+            out.asr2mode = asr2M{get(hAsr2Mode,'value')};
         else
-            out.asr2     = 0;                    % unchecked = skip the 2nd pass
+            out.asr2     = 0;                    % unchecked, or ERP data: no 2nd pass
         end
-        out.asr2mode     = asr2M{get(hAsr2Mode,'value')};
-        out.plotspectra  = logical(get(hSpectra,'value'));
+        out.plotspectra  = ~d.erp && logical(get(hSpectra,'value'));
         out.ica          = logical(get(hIca,'value'));
         out.icaconfirm   = true;     % GUI always confirms; command line may disable
         out.viseeg       = logical(get(hVisE,'value'));
@@ -482,11 +517,14 @@ uiwait(f);
             out.epochwin  = w;
             out.rejtrials = logical(get(hRej,'value'));
             out.rejmethod = rejKeys{get(hRejM,'value')};
-            if get(hCond,'value') > 1 && ~isempty(evTypes)
-                condOpts = get(hCond,'string');
-                out.plotconds = condOpts(get(hCond,'value'));
+            if isempty(evTypes)
+                out.epochevents = {};
+                out.plotconds   = {};
             else
-                out.plotconds = {};
+                out.epochevents = evTypes(get(hEv,'value'));
+                condOpts = get(hCond,'string');
+                out.plotconds   = condOpts(get(hCond,'value'));
+                out.plotconds   = out.plotconds(:)';
             end
         end
         close(f);
