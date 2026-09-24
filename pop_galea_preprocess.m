@@ -8,15 +8,15 @@ function [EEG, com] = pop_galea_preprocess(EEG, varargin)
 % the same route from the command line.
 %
 % EEG steps, each optional:
-%   0. Trim. Drop the data before the first event (minus a pad, default 3 s)
+%   0. Trim. Drop the data before the first event (minus a pad, default 1 s)
 %      and after the last event (plus the same pad). The head and tail of a
 %      Galea recording are often full of adjustment artefacts that bias ASR
 %      and ICA. Applies to the EEG AND all auxiliary streams (PPG, EDA, EMG,
 %      IMU), each at its own sampling rate.
 %   1. Downsample.
-%   2. Bandpass. Optionally minimum-phase CAUSAL, which keeps the pre-stimulus
-%      period free of post-stimulus leakage. Only needed for anticipation
-%      analyses, so it is off by default.
+%   2. Bandpass, minimum-phase CAUSAL by default, which keeps the pre-stimulus
+%      period free of post-stimulus leakage (the paper's setting). Set
+%      'causal' to false for a zero-phase filter in post-stimulus-only work.
 %   3. Polarity check on the two prefrontal disc electrodes, which the Galea
 %      amplifier sometimes records with inverted leads. Off by default; turn it
 %      on if you are using the custom montage with Fp1/Fp2.
@@ -48,9 +48,9 @@ function [EEG, com] = pop_galea_preprocess(EEG, varargin)
 %   'maxtol'   max fraction of flagged windows      [0.30]
 %   'interpchan' interpolate the detected bad channels [true]
 %   'asr'      ASR SD threshold, 0 = skip           [100]
-%   'asrmode'  'reconstruct' (default: ASR interpolates the bad segments) or
-%              'remove' (the affected segments are deleted, and any event
-%              markers that fell inside them are listed in the console) ['reconstruct']
+%   'asrmode'  'remove' (the affected segments are deleted, and any event
+%              markers that fell inside them are listed in the console) or
+%              'reconstruct' (ASR interpolates the bad segments)  ['remove']
 %   'ica'      ICA, remove the ocular component     [true]
 %   'icaconfirm' ask before removing the component  [true]
 %              (command line only; the GUI always asks)
@@ -388,11 +388,10 @@ EEG.etc.galea_preprocess.badChan = badChan;
 EEG.etc.galea_preprocess.ica = icaInfo;
 EEG = eeg_checkset(EEG);
 
-com = sprintf(['EEG = pop_galea_preprocess(EEG, ''trim'',%g, ''resample'',%g, ''locut'',%g, ''hicut'',%g, ' ...
-    '''causal'',%d, ''polarity'',%d, ''badchan'',%d, ''mincorr'',%g, ''maxtol'',%g, ' ...
-    '''asr'',%g, ''asrmode'',''%s'', ''ica'',%d, ''asr2'',%g, ''asr2mode'',''%s'', ''plotspectra'',%d, ''ppg'',%d);'], ...
-    g.trim, g.resample, g.locut, g.hicut, g.causal, g.polarity, g.badchan, ...
-    g.mincorr, g.maxtol, g.asr, g.asrmode, g.ica, g.asr2, g.asr2mode, g.plotspectra, g.ppg);
+% Every option, so the EEGLAB history (eegh) replays exactly what ran,
+% including the EOG, PPG, EDA, EMG and IMU settings.
+args = [fieldnames(g), struct2cell(g)]';
+com = sprintf('EEG = pop_galea_preprocess(EEG, %s);', vararg2str(args(:)'));
 
 end
 

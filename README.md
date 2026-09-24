@@ -11,11 +11,12 @@ Cedric Cannard, 2026. GPL-3.0 (see LICENSE).
 ## Install
 
 **From the EEGLAB extension manager (recommended):** in EEGLAB, *File > Manage
-extension manager* (or *Tools > Manage extensions* depending on version), search
-for **galea**, and install.
+EEGLAB extensions*, search for **galea**, and install.
 
-**From this repository:** copy or clone this folder into `eeglab/plugins/` and
-restart EEGLAB. Either way, a single **Galea** entry appears in the EEGLAB menu
+**From a release:** download the zip from the
+[releases page](https://github.com/amisepa/galea-eeglab-plugin/releases), unzip
+it into `eeglab/plugins/`, and restart EEGLAB. Cloning this repository into
+`eeglab/plugins/` works too. Either way, a single **Galea** entry appears in the EEGLAB menu
 bar. It opens the main window (file, montage, data type, preprocess yes/no);
 **Next** imports the recording and opens the processing parameters, one
 section per signal, and **Run** there starts the processing.
@@ -23,6 +24,21 @@ section per signal, and **Run** there starts the processing.
 Dependencies: none for import/EEG processing. The optional PPG (heart-rate)
 branch uses the [BrainBeats](https://github.com/sccn/brainbeats) plugin; the
 Galea window finds and installs it automatically if missing.
+
+## The two windows
+
+**Main window** (menu *Galea*): select the recording, the montage, the data
+type (continuous or ERP), and whether to preprocess. **Next** imports the file
+and opens the processing parameters.
+
+![Main window](figures/gui_main.png)
+
+**Processing parameters**: one section per signal, every signal ticked by
+default. The ERP section (epoch window, bad-trial rejection, condition plot)
+appears for ERP data only. **Run** starts the processing. Shown with the
+settings of Cannard & Yeşilbaş (2026).
+
+![Processing parameters](figures/gui_preprocess.png)
 
 ## What it does
 
@@ -92,21 +108,21 @@ Two sample recordings ship in `sample_data/`:
   continuous resting-state recording (250 Hz, no markers), for trying the
   import on a continuous dataset.
 
-## Scripting
+## Scripting and `eegh`
+
+Every step the windows run is written to the EEGLAB history, so after a GUI
+run `eegh` prints commands you can paste into a script:
 
 ```matlab
-EEG = pop_galea_import('montage', 'custom');
-EEG = pop_galea_preprocess(EEG, 'locut', 0.5, 'hicut', 30, 'causal', true);
+EEG = pop_galea_import('montage','custom', 'filename','Sample-Data-OpenBCI-RAW.txt', 'filepath', pwd);
+EEG = pop_galea_preprocess(EEG, 'locut',0.5, 'hicut',30, 'causal',true, 'asr',100, 'ica',true);
+EEG = galea_erp_workflow(EEG, 'epochwin',[-3 3], 'rejtrials',true, 'plotconds',{'tire_pop'});
 ```
 
-or the one-window route:
-
-```matlab
-EEG = pop_galea();
-```
-
-Both return an EEGLAB history string, so they work with `eegh` and in batch
-scripts. The GUIs and the script interface take identical options.
+`EEG = pop_galea;` opens the main window from the command line.
+`pop_galea_preprocess(EEG)` with no options opens the processing parameters
+window on a dataset that is already loaded. The windows and the scripts take
+the same option names (see `help pop_galea_preprocess`).
 
 ## Also included
 
@@ -114,6 +130,8 @@ scripts. The GUIs and the script interface take identical options.
   residual, using a mean-based outlier criterion.
 
 ## Citation
+
+If you use this plugin, please cite:
 
 Cannard, C., & Yeşilbaş, D. (2026). *Reactive and predictive processes during
 unpredictable driving hazards in virtual reality: an exploratory brain and body

@@ -10,11 +10,10 @@ function vers = eegplugin_galea(fig, trystrs, catchstrs)
 %
 % Cedric Cannard, 2026
 
-vers = 'galea1.3';
+vers = 'galea1.6';
 
-if nargin < 3
-    error('eegplugin_galea requires 3 arguments');
-end
+% no arguments: just report the version (pop_galea_import stamps it on the data)
+if nargin < 3, return; end
 
 p = fileparts(which('eegplugin_galea'));
 addpath(p);

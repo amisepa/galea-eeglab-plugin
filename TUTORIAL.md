@@ -12,8 +12,11 @@ is [`tutorial_galea.m`](tutorial_galea.m)
 
 ### 1. Install
 
-Copy (or clone) `galea_eeglab_plugin/` into `eeglab/plugins/` and restart
-EEGLAB. A single **Galea** entry appears in the EEGLAB menu bar.
+In EEGLAB, **File > Manage EEGLAB extensions**, search for **galea** and
+install. Or download the release zip from
+[the releases page](https://github.com/amisepa/galea-eeglab-plugin/releases),
+unzip it into `eeglab/plugins/`, and restart EEGLAB. A single **Galea** entry
+appears in the EEGLAB menu bar.
 
 You also need the
 [BrainBeats](https://github.com/amisepa/BrainBeats) plugin if you want the PPG
@@ -52,9 +55,10 @@ Select the main file only; the plugin picks up its Aux twin itself.
 3. Pick the **data type**: **Continuous** (resting state) or **ERP**
    (event-related). This is only the choice; the ERP options (epoch window,
    bad-trial rejection, condition plot) are set in the next window.
-4. Choose **Preprocess: Yes/No** (default **Yes**). With Yes, **Next** imports
-   the file, then opens the processing parameters before any cleaning starts.
-   With No, the button reads **Import** and loads the raw recording only.
+4. Choose **Preprocess: Yes/No** (default **Yes**; the pipeline of Cannard &
+   Yeşilbaş, 2026). With Yes, **Next** imports the file, then opens the
+   processing parameters before any cleaning starts. With No, the button reads
+   **Import** and loads the raw recording only.
 
 The import splits the multiplexed streams into EEG, EOG, EMG, PPG, EDA and IMU
 (non-EEG streams are kept in `EEG.etc.galea`, nothing is discarded), sets the
@@ -74,13 +78,13 @@ not need. **Run** starts the processing.
 
 - **EEG**
   - *Trim pad* — removes data before the first event and after the last
-    event, plus a pad. Applies to the EEG *and* all auxiliary signals. `0`
-    keeps everything.
+    event, plus a pad (default 1 s). Applies to the EEG *and* all auxiliary
+    signals. `0` keeps everything.
   - *Downsample* — a dropdown that lists the detected rate first ("keep
     current rate"), then rate/2 and rate/4 (dividing avoids resampling
     artefacts at non-integer ratios), then common fixed rates.
-  - *Bandpass* — 0.5–30 Hz, **minimum-phase causal by default** (the Cannard
-    2026 pipeline setting, safe for pre-stimulus analyses: a zero-phase filter
+  - *Bandpass* — 0.5–30 Hz, **minimum-phase causal by default** (the setting
+    of the Cannard & Yeşilbaş 2026 pipeline, safe for pre-stimulus analyses: a zero-phase filter
     smears post-stimulus activity backwards in time and can manufacture an
     anticipatory effect that is entirely artefactual). Untick it only for
     post-stimulus-only analyses where a zero-phase response is preferred.
@@ -112,21 +116,35 @@ not need. **Run** starts the processing.
 
 Click **Run**.
 
-### 5. Epoch by hand (optional)
+### 5. The command history (`eegh`)
+
+Everything the window did is written to the EEGLAB history as plain commands.
+Type `eegh` after a run to see them, for example:
+
+```matlab
+EEG = pop_galea_import('montage','custom', 'filename','Sample-Data-OpenBCI-RAW.txt', 'filepath','...\sample_data');
+EEG = pop_galea_preprocess(EEG, 'trim',1, 'resample',0, 'locut',0.5, 'hicut',30, 'causal',1, ...);
+EEG = galea_erp_workflow(EEG, 'epochwin',[-3 3], 'rejtrials',1, 'rejmethod','mean', 'plotconds',{'tire_pop'});
+```
+
+Paste them into a script to rerun the same processing on other recordings
+without the GUI. They are also saved in `EEG.history`.
+
+### 6. Epoch by hand (optional)
 
 For ERP data the plugin has already epoched. To cut different epochs, or to
 epoch a dataset processed as continuous, eyeball the cleaned signal first
 (**Plot > Channel data and scroll**), then **Tools > Extract epochs**: e.g.
 `[-1.5 1.5]` s around `tire_pop` (the tyre blowout), baseline removal off.
 
-### 6. Average and plot
+### 7. Average and plot
 
 Compute the condition average with **Tools > Average across files or across
 channels > Average over trials** (or, in the script version,
 `pop_select` + `mean(SET.data, 3)`), then plot with
 **Plot > Channel data and scalp maps > Channel ERPs**.
 
-### 7. Where to go next
+### 8. Where to go next
 
 - Epoch rejection by amplitude and high-frequency residual:
   `functions/find_badTrials.m`
@@ -136,7 +154,7 @@ channels > Average over trials** (or, in the script version,
   import on a continuous dataset:
   [`sample_data/`](sample_data/)
 
-## 8. Spectra of a continuous recording
+### 9. Spectra of a continuous recording
 
 The resting-state sample (`sample_data/Sample-Data-OpenBCI-RAW-RestingState.txt`,
 5.5 min, no markers) is for trying the plugin on continuous data. Load it with
@@ -151,5 +169,3 @@ or through the GUI: **Plot > Channel properties > Spectra** (set the frequency
 range to 1-70 Hz). What to look for: the eyes-closed alpha peak near 10 Hz,
 theta around 6 Hz, beta around 22 Hz; a flat spectrum above ~40 Hz is normal
 for dry electrodes.
-
-> **TODO**: screenshot of the spectra figure here.

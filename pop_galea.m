@@ -14,13 +14,17 @@ function [EEG, com] = pop_galea(EEG)
 % the chosen condition is plotted (20% trimmed mean + SEM, and the
 % single-trial ERP image). With No, Import loads the raw recording only.
 %
+% COM holds the equivalent command-line calls (pop_galea_import,
+% pop_galea_preprocess, galea_erp_workflow), so the EEGLAB history (eegh)
+% replays the session as a script.
+%
 % Cedric Cannard, 2026
 
 if nargin < 1, EEG = []; end
 com = '';
 
 c = galea_colors();
-S = struct('file','', 'path','', 'EEG',[], 'ok',false, 'savePath','');
+S = struct('file','', 'path','', 'EEG',[], 'ok',false, 'savePath','', 'com','');
 procOpt = [];       % parameters set on a previous visit to the parameters window
 
 W = 860;
@@ -97,10 +101,15 @@ y = y - 26;
 hErp  = uicontrol(f,'style','radiobutton','string','ERP data (segment, clean, average)', ...
     'value',0,'position',[40 y 400 22], 'backgroundcolor',c.back,'foregroundcolor',c.text, ...
     'callback',@(~,~) onMode(false));
+y = y - 22;
+lbl('The ERP options (epoch window, bad trials, condition plot) are set after Next.', ...
+    [40 y 796 18], 'fontangle','italic','fontsize',8);
 
 % ---------- 3. preprocess ----------
-y = y - 38; sepline(y+11);
-sec('3.  Preprocess (Cannard 2026 methods)', [22 y 400 22]);
+% Cite the paper the default parameters come from (Cannard & Yesilbas 2026).
+% char(351) is the s-cedilla, so the name is right whatever the file encoding.
+y = y - 34; sepline(y+11);
+sec(['3.  Preprocess (Cannard & Ye' char(351) 'ilba' char(351) ' 2026 methods)'], [22 y 560 22]);
 y = y - 32;
 hPreYes = uicontrol(f,'style','radiobutton','string','Yes (recommended)', ...
     'value',1,'position',[40 y 170 22], 'backgroundcolor',c.back,'foregroundcolor',c.text, ...
@@ -109,7 +118,7 @@ hPreNo  = uicontrol(f,'style','radiobutton','string','No (keep raw)', ...
     'value',0,'position',[220 y 170 22], 'backgroundcolor',c.back,'foregroundcolor',c.text, ...
     'callback',@(~,~) onPre(false));
 y = y - 26;
-hPreNote = lbl('', [40 y 796 22], 'fontangle','italic','fontsize',8);   % text set by gate()
+hPreNote = lbl('', [40 y 796 18], 'fontangle','italic','fontsize',8);   % text set by gate()
 
 % ---------- output ----------
 y = y - 24;
@@ -133,7 +142,7 @@ uiwait(f);
 
 if ~isempty(S.EEG) && S.ok
     EEG = S.EEG;
-    com = 'EEG = pop_galea();';
+    com = S.com;
 end
 
 % ===================== helpers =====================
@@ -180,8 +189,8 @@ end
             else
                 steps = 'trim, EEG, EOG, PPG, EDA, EMG, IMU';
             end
-            set(hPreNote, 'string', ['Next imports the file, then opens the processing ' ...
-                'parameters (' steps '). Run in that window starts the processing.']);
+            set(hPreNote, 'string', ['Next imports the file and opens the processing ' ...
+                'parameters (' steps ').']);
         else
             set(hNext, 'string', 'Import');
             set(hPreNote, 'string', 'Import loads the raw recording only: no cleaning, no epoching.');
@@ -240,7 +249,7 @@ end
             'foregroundcolor',c.text);
         drawnow
         try
-            D = pop_galea_import('montage', montKey, 'filename', S.file, 'filepath', S.path);
+            [D, icom] = pop_galea_import('montage', montKey, 'filename', S.file, 'filepath', S.path);
         catch ME
             set(f,'pointer','arrow');
             set(hStatus,'string','Import failed.','foregroundcolor',[.55 .1 .1]);
@@ -282,19 +291,22 @@ end
         % open sits on top of them.
         close(f);
 
+        S.com = icom;
         if doPre
             % Name/value pairs. The transpose matters: {:} reads a cell
             % column by column, so an N-by-2 [names values] cell would pass
             % every name first and every value after them.
             args = [fieldnames(opt), struct2cell(opt)]';
             try
-                D = pop_galea_preprocess(D, args{:});
+                [D, pcom] = pop_galea_preprocess(D, args{:});
             catch ME
                 errordlg(sprintf('Processing failed: %s', ME.message), 'Galea');
                 return
             end
+            S.com = [S.com ' ' pcom];
             if isErp
-                D = galea_erp_workflow(D, opt);
+                [D, ecom] = galea_erp_workflow(D, opt);
+                S.com = [S.com ' ' ecom];
             end
         end
 

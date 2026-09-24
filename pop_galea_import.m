@@ -60,7 +60,7 @@ end
 
 EEG.etc.galea = struct('EOG',EOG, 'EMG',EMG, 'PPG',PPG, ...
                        'EDA',EDA, 'IMU',IMU, 'AUX',AUX, ...
-                       'montage',g.montage, 'plugin_version','galea1.1');
+                       'montage',g.montage, 'plugin_version',eegplugin_galea());
 
 % Trigger labels. Applied only if the codes match the VR driving paradigm.
 EEG = galea_rename_events(EEG);
@@ -69,7 +69,9 @@ EEG = eeg_checkset(EEG);
 fprintf('Imported %d channels, %.1f min at %g Hz.\n', ...
     EEG.nbchan, EEG.pnts/EEG.srate/60, EEG.srate);
 
-com = sprintf('EEG = pop_galea_import(''montage'', ''%s'');', g.montage);
+% the file goes into the history too, so eegh replays without a file dialog
+com = sprintf('EEG = pop_galea_import(''montage'', ''%s'', ''filename'', ''%s'', ''filepath'', ''%s'');', ...
+    g.montage, EEG.filename, EEG.filepath);
 
 % ---------------- optional preprocessing ----------------
 if g.preprocess

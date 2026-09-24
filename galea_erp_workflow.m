@@ -1,9 +1,11 @@
 %% Copyright (c) 2026 Cedric Cannard. GPL-3.0 (see the repository LICENSE).
 
-function EEG = galea_erp_workflow(EEG, opt)
+function [EEG, com] = galea_erp_workflow(EEG, varargin)
 %GALEA_ERP_WORKFLOW  Segment, reject bad trials, plot condition ERPs.
 %
 %   >> EEG = galea_erp_workflow(EEG, opt)
+%   >> EEG = galea_erp_workflow(EEG, 'epochwin',[-3 3], 'rejtrials',true, ...
+%                               'plotconds',{'tire_pop'})
 %
 % The ERP branch of pop_galea, after the continuous processing has run.
 % Segments around the markers in the file, optionally rejects bad trials
@@ -12,15 +14,24 @@ function EEG = galea_erp_workflow(EEG, opt)
 % summary used in the Cannard pipeline) plus its single-trial ERP image
 % (erpimage).
 %
-% OPT uses the galea_process_defaults names (missing keys keep defaults):
+% Options, as a struct or as name/value pairs, use the galea_process_defaults
+% names (missing keys keep defaults):
 %   'epochwin'   [pre post] epoch window in s              [-1.5 1.5]
 %   'rejtrials'  reject bad trials                         [false]
 %   'rejmethod'  'mean' (conservative), 'median', 'grubbs' (aggressive) ['mean']
 %   'plotconds'  cell of event labels to plot, {} = none   [{}]
 %
+% COM is the command-line equivalent, for the EEGLAB history (eegh).
+%
 % Cedric Cannard, 2026
 
-if nargin < 2, opt = struct(); end
+com = '';
+if numel(varargin) == 1 && isstruct(varargin{1})
+    opt = varargin{1};
+else
+    opt = struct();
+    for iA = 1:2:numel(varargin), opt.(lower(varargin{iA})) = varargin{iA+1}; end
+end
 d = galea_process_defaults();
 fn = fieldnames(opt);
 for iF = 1:numel(fn), d.(fn{iF}) = opt.(fn{iF}); end
@@ -42,6 +53,12 @@ types = unique({EEG.event.type});
 EEG = pop_epoch(EEG, types, win, 'epochinfo','yes');
 fprintf('Epoched [%g %g] s around all markers: %g epochs.\n', win(1), win(2), EEG.trials);
 
+conds = opt.plotconds;
+if ischar(conds), conds = {conds}; end
+conds = conds(~cellfun(@isempty, conds));
+com = sprintf('EEG = galea_erp_workflow(EEG, %s);', vararg2str({'epochwin', win, ...
+    'rejtrials', logical(opt.rejtrials), 'rejmethod', opt.rejmethod, 'plotconds', conds}));
+
 % ---------------- bad trials ----------------
 if opt.rejtrials
     try
@@ -58,9 +75,6 @@ if opt.rejtrials
 end
 
 % ---------------- condition ERPs ----------------
-conds = opt.plotconds;
-if ischar(conds), conds = {conds}; end
-conds = conds(~cellfun(@isempty, conds));
 if isempty(conds)
     return
 end
