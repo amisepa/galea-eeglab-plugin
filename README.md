@@ -1,5 +1,7 @@
 # galea-eeglab-plugin
 
+![galea-eeglab-plugin](figures/repo_banner.png)
+
 EEGLAB plugin for importing and preprocessing recordings from the Galea
 multimodal VR headset (OpenBCI) — dry-electrode EEG integrated into a Varjo Aero
 head-mounted display.
@@ -34,9 +36,11 @@ assumptions, and this plugin handles each one.
   `OpenBCI-RAW-Aux-<date>.txt` with PPG/EDA/IMU); select the main file and its
   Aux twin is picked up automatically. The multiplexed streams are split into
   EEG, EOG, EMG, PPG, EDA and IMU (nothing discarded — non-EEG streams stay in
-  `EEG.etc.galea`), the sampling rate is derived from the device timestamps
-  (the effective rate is typically ~248 Hz, not the advertised 250 Hz, and the
-  difference propagates into every latency and wavelet frequency downstream),
+  `EEG.etc.galea`), the sampling rate is estimated from both the device and the
+  PC timestamps and snapped to the board's nominal rate (the two clocks disagree
+  — RawPCTimestamp gives ~249.95 Hz and RawDeviceTimestamp ~247.72 Hz, so
+  neither is trustworthy alone; the difference propagates into every latency
+  and wavelet frequency downstream),
   both the stock 10-channel montage and the 12-channel custom montage (the two
   EMG disc electrodes reconfigured as Fp1/Fp2) are supported, and the numeric
   trigger codes are converted into readable event labels for the VR driving
