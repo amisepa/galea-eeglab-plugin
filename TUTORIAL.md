@@ -80,11 +80,11 @@ optional and each can be switched off individually.
   - *Downsample* — a dropdown that lists the detected rate first ("keep
     current rate"), then rate/2 and rate/4 (dividing avoids resampling
     artefacts at non-integer ratios), then common fixed rates.
-  - *Bandpass* — 0.5–30 Hz for ERP work.
-  - *Causal minimum-phase filter* — tick this for any **pre-stimulus**
-    analysis. A zero-phase filter smears post-stimulus activity backwards in
-    time and can manufacture an anticipatory effect that is entirely
-    artefactual. Leave unticked for post-stimulus-only analyses.
+  - *Bandpass* — 0.5–30 Hz, **minimum-phase causal by default** (the Cannard
+    2026 pipeline setting, safe for pre-stimulus analyses: a zero-phase filter
+    smears post-stimulus activity backwards in time and can manufacture an
+    anticipatory effect that is entirely artefactual). Untick it only for
+    post-stimulus-only analyses where a zero-phase response is preferred.
   - *Bad-channel detection* — tuned for a sparse dry montage (12 electrodes),
     where `clean_rawdata`'s correlation criterion is unreliable. Defaults:
     correlation threshold 0.55, at most 30% of windows tolerated. The two
@@ -139,9 +139,8 @@ channels > Average over trials** (or, in the script version,
 
 The resting-state sample (`sample_data/Sample-Data-OpenBCI-RAW-RestingState.txt`,
 5.5 min, no markers) is for trying the plugin on continuous data. Load it with
-the **Galea** menu, preprocess with the causal filter OFF (nothing to
-anticipate in resting state; a 1-70 Hz band is enough for spectra), then plot
-the spectra:
+the **Galea** menu, untick the causal filter (nothing to anticipate in resting
+state; a 1-70 Hz band is enough for spectra), then plot the spectra:
 
 ```matlab
 figure; pop_spectopo(EEG, 1, [], 'EEG', 'freq', [6 10 22], 'freqrange',[1 70], 'electrodes','off');

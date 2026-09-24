@@ -5,20 +5,22 @@ function out = galea_process_gui(def)
 %
 %   >> out = galea_process_gui(def)
 %
-% One dialog for ALL processing parameters - EEG first (montage, filters, bad
+% One dialog for ALL processing parameters - EEG first (filters, bad
 % channels, ASR, ICA), then the other recorded signals (EOG, PPG, EDA, EMG,
 % IMU). They are not "peripherals": for many studies they are as or more
 % important than the EEG, so they sit in the same window with the same
 % structure, separated by horizontal rules. Each modality's "process" checkbox
-% enables/disables its parameters; the Fp1/Fp2 polarity check is only enabled
-% for the custom montage.
+% enables/disables its parameters. The montage is chosen in the main window
+% (pop_galea); the Fp1/Fp2 polarity check arrives pre-ticked for the custom
+% montage.
 %
 % Row discipline (keep the window sized to its content): every row does
 % "y = y - rowH" FIRST, then places controls of height <= rowH - 2 at y. The
 % height budget below must match the decrements exactly.
 %
 % DEF holds the current values (a galea_process_defaults struct, any subset;
-% missing keys keep their defaults). OUT returns the full set, or [] if
+% missing keys keep their defaults). DEF.srate, when present and finite, fills
+% the Downsample list with the true rate. OUT returns the full set, or [] if
 % cancelled.
 %
 % Cedric Cannard, 2026
@@ -36,17 +38,17 @@ scr = get(0, 'ScreenSize');
 % ---- height budget (must stay in sync with the layout below) ----
 % top margin 36 + rows + buttons 56; NO screen clamp (controls must never
 % overlap; a too-tall window just extends past the screen bottom)
-% EEG: title 26, montage 20, ExG note 20, polarity 22, downsample 22,
-%      bandpass+causal 22, badchan 22, corr 22, max% 22, ASR 22,
-%      lenient note 20, ICA 22, plot 22, sep 20 = 302
+% EEG: title 26, polarity 22, downsample 22, bandpass+causal 22,
+%      badchan 22, corr 22, max% 22, interp 22, ASR 22, lenient note 20,
+%      ICA 22, plot 22, sep 20 = 264
 % EOG: box 24, bandpass 24, plot 24, sep 20 = 92
 % PPG: box 24, bandpass+detect 26, RR label 22, pchip note 20, HRV 22,
 %      sep 20 = 134
 % EDA: box 24, bandpass 24, tonic-phasic 24, plot 22, sep 20 = 114
 % EMG: box 24, filters 24, envelope 24, plot 22, sep 20 = 114
 % IMU: box 24, lowpass 24, ACC_MAG 22, plot 22 = 92
-rowsEEG   = 302;  rowsEOG = 92;  rowsPPG = 134;
-rowsEDA   = 114;  rowsEMG = 114;  rowsIMU = 92;
+rowsEEG   = 264;  rowsEOG = 92;  rowsPPG = 134;
+rowsEDA   = 114;  rowsEMG = 114; rowsIMU = 92;
 H = 36 + 56 + rowsEEG + rowsEOG + rowsPPG + rowsEDA + rowsEMG + rowsIMU;
 % never clamp: controls must never overlap; a too-tall window
 % just extends past the screen bottom, every control stays usable
@@ -76,30 +78,52 @@ f = figure('Name','Galea processing parameters', 'NumberTitle','off', 'MenuBar',
         uicontrol(f,'style','frame','position',[20 yy W-40 1], ...
             'foregroundcolor',[.4 .45 .6],'backgroundcolor',[.4 .45 .6]);
     end
+    function s = gateStr(tf)
+        if tf, s = 'on'; else, s = 'off'; end
+    end
 
 % ---------------- EEG ----------------
 y = H - 36;
 y = y - 26;
 txt('EEG', [20 y 200 24], 'fontweight','bold','fontsize',12);
 
-y = y - 20;
-txt('Montage:', [20 y 90 20]);
-hMont = uicontrol(f,'style','popupmenu','position',[115 y 340 20],'backgroundcolor',c.btn, ...
-    'string',{'default (10 EEG)','custom (12 EEG, Fp1/Fp2 from disc electrodes)'}, ...
-    'value', find(strcmp({'default','custom'}, d.montage)));
-
-y = y - 20;
-txt(['Default: ExG 7-8 stay facial EMG.  Custom: they become EEG at Fp1/Fp2 - ' ...
-     'only if reconfigured as EEG in the Galea software when recording.'], ...
-    [40 y W-60 20], 'fontangle','italic','fontsize',8);
-
 y = y - 22;
 txt('Polarity check:', [20 y 100 20]);
-hPol = cb('correct inverted Fp1/Fp2 disc electrodes', double(d.polarity), [125 y 340 22]);
+% pre-ticked for the custom montage: the two disc electrodes ARE Fp1/Fp2
+% there, and that amplifier path is the one known to invert leads
+hPol = cb('fix inverted Fp1/Fp2 disc electrodes (custom montage only)', ...
+    double(d.polarity || strcmpi(d.montage, 'custom')), [125 y 470 22], ...
+    'tooltipstring', ['ExG channels 7-8 become Fp1/Fp2 in the custom montage. Only correct ' ...
+    'polarity if they were reconfigured as EEG in the Galea software when recording.']);
 
+% ---- downsample: a list, not a free box. The current rate sits on top;
+% dividing it avoids resampling artefacts at non-integer ratios. Falls back
+% to an edit box when the rate is unknown (command-line use).
+dsVals = [];
+srate = NaN;
+if isfield(def, 'srate') && isfinite(def.srate) && def.srate > 0
+    srate = double(def.srate);   % def, not d: galea_process_defaults has no srate key
+end
 y = y - 22;
-txt('Downsample (Hz, 0 = keep):', [20 y 180 20]);
-hRes = ed(sprintf('%g', d.resample), [205 y 60 22]);
+txt('Downsample:', [20 y 100 20]);
+if isnan(srate)
+    hRes = ed(sprintf('%g', d.resample), [205 y 90 22]);
+    set(hRes, 'tooltipstring', 'Target rate in Hz; 0 keeps the current rate.');
+else
+    dsOpts = {sprintf('keep current rate (%g Hz)', srate), ...
+              sprintf('%g Hz (divide by 2)', srate/2), ...
+              sprintf('%g Hz (divide by 4)', srate/4), ...
+              '128 Hz', '250 Hz', '512 Hz'};
+    dsVals = [0, srate/2, srate/4, 128, 250, 512];      % 0 = keep (no resampling)
+    if isfinite(d.resample) && d.resample > 0 && ~any(abs(dsVals - d.resample) < 0.05)
+        dsOpts{end+1} = sprintf('%g Hz (as previously set)', d.resample);
+        dsVals(end+1) = d.resample;
+    end
+    hRes = uicontrol(f,'style','popupmenu','position',[205 y 220 22],'backgroundcolor',c.btn, ...
+        'string',dsOpts, 'value', max(1, find(abs(dsVals - d.resample) < 0.05, 1)), ...
+        'tooltipstring', ['Dividing the current rate avoids resampling artefacts at ' ...
+        'non-integer ratios. "keep current rate" leaves the recording untouched.']);
+end
 
 y = y - 22;
 txt('Bandpass (Hz):', [20 y 100 20]);
@@ -110,8 +134,8 @@ hCaus = cb('minimum-phase causal filter (only for pre-stimulus analyses)', ...
     double(d.causal), [290 y W-310 22]);
 
 y = y - 22;
-hBad = cb('Detect bad channels', double(d.badchan), [20 y 180 22]);
-hInterp = cb('Interpolate them', double(d.interpchan), [210 y 170 22]);
+hBad = cb('Detect bad channels', double(d.badchan), [20 y 180 22], ...
+    'callback', @(~,~) gateBad());
 
 y = y - 22;
 txt('Channel cross-correlation threshold (lax 0.35 - aggressive 0.85):', [40 y 400 20]);
@@ -122,18 +146,20 @@ txt('Max % of windows a channel may fail before removal (5-50%):', [40 y 400 20]
 hMaxTol = ed(sprintf('%g', d.maxtol*100), [445 y 60 22]);
 
 y = y - 22;
-hAsr = cb('ASR 1st pass', double(d.asr > 0), [20 y 160 22]);
-hAsrTh = ed(sprintf('%g', d.asr), [185 y 60 22]);
-txt('threshold (lenient ~100):', [252 y 160 20], 'fontangle','italic');
-hAsrMode = uicontrol(f,'style','popupmenu','position',[420 y 130 22], ...
+hInterp = cb('Interpolate the detected bad channels', double(d.interpchan), [40 y 320 22]);
+
+y = y - 22;
+hAsr = cb('ASR 1st pass', double(d.asr > 0), [20 y 130 22]);
+hAsrTh = ed(sprintf('%g', d.asr), [155 y 60 22]);
+hAsrMode = uicontrol(f,'style','popupmenu','position',[225 y 130 22], ...
     'backgroundcolor',c.btn, 'string',{'reconstruct','remove'}, ...
     'value', find(strcmp({'reconstruct','remove'}, d.asrmode)), ...
     'tooltipstring', ['remove: flagged segments are deleted (default; any event markers inside them are ' ...
     'listed in the command window). reconstruct: ASR interpolates the flagged segments instead.']);
 
 y = y - 20;
-txt('   Lenient first pass so ICA can still separate the blink source.', [40 y W-60 18], ...
-    'fontangle','italic','fontsize',8);
+txt('   Lenient first pass (default threshold 100) so ICA can still separate the blink source.', ...
+    [40 y W-60 18], 'fontangle','italic','fontsize',8);
 
 y = y - 22;
 hIca = cb('ICA: Extract the most likely eye component (eyes-open data; visual check and confirmation required)', ...
@@ -250,30 +276,23 @@ hIHi = ed(sprintf('%g', d.imuhicut), [175 y 60 22]);
 imuKids(end+1) = hIHi;
 
 y = y - 22;
-hMag = cb('Compute ACC\_MAG: orientation-independent head-motion metric', ...
+hMag = cb('Compute ACC_MAG: orientation-independent head-motion metric', ...
     double(d.imumagnitude), [40 y W-70 22]);
 imuKids(end+1) = hMag;
 
 y = y - 22;
-hVisI = cb('Plot all IMU channels incl. ACC\_MAG', double(d.visimu), [40 y W-70 22]);
+hVisI = cb('Plot all IMU channels incl. ACC_MAG', double(d.visimu), [40 y W-70 22]);
 imuKids(end+1) = hVisI;
 
 % ---------------- gating ----------------
-gateMontage();
+gateBad();
 gateAll();
 
-    function gateMontage()
-        % the Fp1/Fp2 polarity check only makes sense when the disc electrodes
-        % ARE Fp1/Fp2, i.e. the custom montage
-        if get(hMont,'value') == 2
-            set(hPol, 'enable', 'on');
-            set(hMont, 'tooltipstring', ['ExG channels 7-8 (EMG5/EMG6) become Fp1/Fp2. ' ...
-                'Only correct polarity if they were reconfigured as EEG when recording.']);
-        else
-            set(hPol, 'enable', 'off');
-            set(hPol, 'value', 0);
-            set(hMont, 'tooltipstring', '');
-        end
+    function gateBad()
+        % the correlation / max-% thresholds and the interpolation only act
+        % when bad-channel detection runs
+        on = gateStr(logical(get(hBad,'value')));
+        set([hCorr hMaxTol hInterp], 'enable', on);
     end
 
     function gateAll()
@@ -285,17 +304,12 @@ gateAll();
         set(imuKids(isgraphics(imuKids)), 'enable', gateStr(get(hImu,'value')));
     end
 
-    function s = gateStr(tf)
-        if tf, s = 'on'; else, s = 'off'; end
-    end
-
-% wire the gates to the modality boxes and the montage popup
+% wire the gates to the modality boxes
 set(hEog, 'callback', @(~,~) gateAll());
 set(hPpg, 'callback', @(~,~) gateAll());
 set(hEda, 'callback', @(~,~) gateAll());
 set(hEmg, 'callback', @(~,~) gateAll());
 set(hImu, 'callback', @(~,~) gateAll());
-set(hMont, 'callback', @(~,~) gateMontage());
 
 % ---------------- buttons ----------------
 out = [];
@@ -307,18 +321,20 @@ uicontrol(f,'style','pushbutton','string','OK','position',[W-105 18 85 30], ...
 uiwait(f);
 
     function onOK()
-        monts = get(hMont,'string');
         asrM = get(hAsrMode,'string');
         detOpts = get(hDet,'string');
         out = d;
-        out.montage      = monts{get(hMont,'value')};
         out.polarity     = logical(get(hPol,'value'));
-        out.resample     = str2double(get(hRes,'string'));
+        if ~isempty(dsVals) && isgraphics(hRes) && strcmp(get(hRes,'style'), 'popupmenu')
+            out.resample = dsVals(get(hRes,'value'));
+        else
+            out.resample = str2double(get(hRes,'string'));
+        end
         out.locut        = str2double(get(hLo,'string'));
         out.hicut        = str2double(get(hHi,'string'));
         out.causal       = logical(get(hCaus,'value'));
         out.badchan      = logical(get(hBad,'value'));
-        out.interpchan   = logical(get(hInterp,'value'));
+        out.interpchan   = logical(get(hInterp,'value')) && out.badchan;
         out.mincorr      = str2double(get(hCorr,'string'));
         out.maxtol       = str2double(get(hMaxTol,'string')) / 100;   % % -> fraction
         if logical(get(hAsr,'value'))

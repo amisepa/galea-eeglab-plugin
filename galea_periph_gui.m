@@ -67,9 +67,6 @@ f = figure('Name','Galea peripheral signals', 'NumberTitle','off', 'MenuBar','no
         uicontrol(f,'style','frame','position',[20 yy W-40 1], ...
             'foregroundcolor',[.4 .45 .6],'backgroundcolor',[.4 .45 .6]);
     end
-    function onoff(tf)
-        if tf, s = 'on'; else, s = 'off'; end
-    end %#ok<NASGU>
 
 y = H - 36;
 txt('Peripheral signal processing', [20 y 300 24], 'fontweight','bold','fontsize',12);
@@ -162,11 +159,11 @@ txt('Low-pass (Hz):', [40 y 130 20]);
 hIHi = ed(sprintf('%g', d.imuhicut), [175 y 60 24]);
 imuKids(end+1) = hIHi;
 y = y - 26;
-hMag = cb('Compute ACC\_MAG: orientation-independent head-motion metric', ...
+hMag = cb('Compute ACC_MAG: orientation-independent head-motion metric', ...
     double(d.imumagnitude), [40 y W-70 22]);
 imuKids(end+1) = hMag;
 y = y - 24;
-hVisI = cb('Plot all IMU channels incl. ACC\_MAG', double(d.visimu), [40 y W-70 22]);
+hVisI = cb('Plot all IMU channels incl. ACC_MAG', double(d.visimu), [40 y W-70 22]);
 imuKids(end+1) = hVisI;
 
 % grey the whole PPG section out when there is no PPG stream

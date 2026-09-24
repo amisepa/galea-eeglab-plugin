@@ -36,16 +36,16 @@ function [EEG, com] = pop_galea_preprocess(EEG, varargin)
 %
 % EEG key/value (defaults in brackets):
 %   'trim'     trim around first/last event, seconds (0 = keep); applies to
-%              all signals                                [3]
+%              all signals                                [1]
 %   'resample' target Hz, 0 = keep                  [0]
 %   'locut'    high-pass cutoff, Hz                 [0.5]
 %   'hicut'    low-pass cutoff, Hz                  [30]
-%   'causal'   minimum-phase causal filter          [false]
+%   'causal'   minimum-phase causal filter          [true]
 %   'polarity' fix Fp1/Fp2 polarity                 [false]
 %   'badchan'  detect bad channels                     [true]
 %   'mincorr'  correlation threshold (paper=.55, aggressive=.75, medium=.5, lax=.35) [0.55]
 %   'maxtol'   max fraction of flagged windows      [0.30]
-%   'interpchan' interpolate the detected bad channels [false]
+%   'interpchan' interpolate the detected bad channels [true]
 %   'asr'      ASR SD threshold, 0 = skip           [100]
 %   'asrmode'  'reconstruct' (default: ASR interpolates the bad segments) or
 %              'remove' (the affected segments are deleted, and any event
@@ -81,10 +81,10 @@ function [EEG, com] = pop_galea_preprocess(EEG, varargin)
 % EDA key/value:
 %   'eda'       filter the EDA (0.01-1 Hz)          [false]
 %   'edalocut' / 'edahicut'  EDA bandpass, Hz       [0.01 / 1]
-%   'edaphasic' cvxEDA tonic/phasic decomposition   [false]
+%   'edaphasic' cvxEDA tonic/phasic decomposition   [true]
 %               (solved at 8 Hz - inside the 4-10 Hz band the literature
 %               finds useful for EDA deconvolution; no user-facing
-+%               downsample option)
+%               downsample option)
 %   'viscvx'    plot the tonic/phasic decomposition on one time-course [true]
 %   'viseda'    plot the EDA raw vs processed       [true]
 %
@@ -113,21 +113,26 @@ hasPPG = isfield(EEG.etc,'galea') && isfield(EEG.etc.galea,'PPG') && ...
          ~isempty(EEG.etc.galea.PPG) && EEG.etc.galea.PPG.nbchan > 0;
 hasEvents = ~isempty(EEG.event);
 
-g = struct('eeg',true, 'trim',3, 'resample',0, 'locut',0.5, 'hicut',30, 'causal',false, ...
-           'polarity',false, 'badchan',true, 'mincorr',0.55, 'maxtol',0.30, 'interpchan',false, ...
+g = struct('eeg',true, 'trim',1, 'resample',0, 'locut',0.5, 'hicut',30, 'causal',true, ...
+           'polarity',false, 'badchan',true, 'mincorr',0.55, 'maxtol',0.30, 'interpchan',true, ...
            'asr',100, 'asrmode','remove', 'ica',true, 'icaconfirm',true, 'asr2',0, 'asr2mode','reconstruct', 'viseeg',true, ...
            'eog',true, 'eoglocut',0.5, 'eoghicut',20, 'viseog',true, ...
            'ppg',hasPPG, 'ppglocut',0.5, 'ppghicut',3, 'ppgdetect','valleys', ...
            'rrcorrect','pchip', ...   % BrainBeats RR interpolation; pchip by default, command line only
            'hrvtime',true, 'hrvfreq',true, 'hrvnonlin',false, 'visppg',true, ...
            'eda',false, 'edalocut',0.01, 'edahicut',1, ...
-           'edaphasic',false, 'viscvx',true, 'viseda',true, ...
+           'edaphasic',true, 'viscvx',true, 'viseda',true, ...
            'emg',false, 'emglocut',20, 'emghicut',0, 'emgenvelope',true, 'visemg',true, ...
            'imu',false, 'imuhicut',10, 'imumagnitude',true, 'visimu',true);
 
+% GUI-only keys the dialogs may carry; accepted and ignored here (the data
+% type drives them in pop_galea).
+guiOnly = {'srate','montage','erp','trimWindow','plotConds'};
 if nargin > 1
     for i = 1:2:numel(varargin)
-        g.(lower(varargin{i})) = varargin{i+1};
+        key = lower(varargin{i});
+        if any(strcmp(key, guiOnly)), continue; end
+        g.(key) = varargin{i+1};
     end
 else
     g = galea_preproc_gui(g, hasPPG, hasEvents, EEG.srate);
@@ -409,7 +414,7 @@ if hasEvents
     y = y - 18;
     txt('removed. Applies to the EEG and ALL auxiliary signals (PPG, EDA, EMG, IMU).', [20 y W-40 20]);
     y = y - 22;
-    txt('Trim pad (s, 0 = keep all):', [20 y 250 20]);  hTrim = ed('3', [300 y 70 24]);
+    txt('Trim pad (s, 0 = keep all):', [20 y 250 20]);  hTrim = ed('1', [300 y 70 24]);
 else
     txt('No events in this dataset; nothing to trim.', [20 y W-40 20], 'fontangle','italic');
     hTrim = ed('0', [300 y 70 24]);
@@ -450,8 +455,6 @@ eegKids(end+1) = hPol;
 y = y - 28;
 hBad = cb('Detect bad channels', 1, [40 y 200 22]);
 eegKids(end+1) = hBad;
-hInterp = cb('Interpolate them', 0, [250 y 160 22]);
-eegKids(end+1) = hInterp;
 y = y - 24;
 txt('Channel cross-correlation threshold (lax 0.35 - aggressive 0.85):', [40 y 340 20]);
 hCorr = ed('0.55', [385 y 70 24]);
@@ -461,12 +464,14 @@ txt('Max % of windows a channel may fail before removal (5-50%):', [40 y 340 20]
 hMaxTol = ed('30', [385 y 70 24]);
 eegKids(end+1) = hMaxTol;
 y = y - 26;
+hInterp = cb('Interpolate the detected bad channels', 0, [40 y 320 22]);
+eegKids(end+1) = hInterp;
+y = y - 26;
 hAsr = cb('ASR 1st pass', 1, [40 y 140 22]);
 eegKids(end+1) = hAsr;
 hAsrTh = ed('100', [185 y 70 24]);
 eegKids(end+1) = hAsrTh;
-txt('threshold (lenient ~100):', [262 y 160 20], 'fontangle','italic');
-hAsrMode = uicontrol(f,'style','popupmenu','position',[430 y 110 24], ...
+hAsrMode = uicontrol(f,'style','popupmenu','position',[265 y 110 24], ...
     'backgroundcolor',c.btn, 'string',{'reconstruct','remove'},'value',2, ...
     'tooltipstring', ['remove: flagged segments are deleted (default; event markers inside them are ' ...
     'listed and stored). reconstruct: flagged segments are interpolated instead.']);
@@ -610,9 +615,10 @@ y = y + 26;                    % 'Process EEG'
 y = y + 26;                    % downsample (+ current-rate label + division popup on same row)
 y = y + 26;                    % bandpass + causal on the same line
 y = y + 24;                    % polarity
-y = y + 28;                    % bad channels + interpolate
+y = y + 28;                    % bad channels
 y = y + 24;                    % correlation threshold
 y = y + 24;                    % max % windows
+y = y + 26;                    % interpolate (own row)
 y = y + 26;                    % ASR 1st pass checkbox + threshold + mode
 y = y + 20 + 16;               % ASR explanation line
 y = y + 22;                    % ICA

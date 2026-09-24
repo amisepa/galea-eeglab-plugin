@@ -5,12 +5,13 @@ function [EEG, com] = pop_galea(EEG)
 %
 %   >> [EEG, com] = pop_galea;
 %
-% Step 1 loads the recording. Step 2 runs the plugin's processing: the common
-% trim, then the per-modality parameters (EEG, PPG, EDA, EMG, IMU - each as
-% important as the EEG for some analyses) in a separate dialog, then a
-% Continuous / ERP choice. Continuous keeps the recording unsegmented and can
-% plot its power spectra; ERP segments around the file's event markers,
-% rejects bad trials, and plots the condition ERPs (20% trimmed mean + SEM).
+% Step 1 loads the recording and picks the montage. Step 2 chooses Continuous
+% or ERP data. Step 3 decides whether to preprocess (default yes): pressing
+% Run with Yes first imports the file, then opens the preprocessing options
+% (EEG, PPG, EDA, EMG, IMU) before any cleaning starts. Continuous mode keeps
+% the recording unsegmented and can plot its power spectra; ERP mode segments
+% around the file's event markers, rejects bad trials, and plots the condition
+% ERPs (20% trimmed mean + SEM) plus the single-trial ERP image.
 %
 % Cedric Cannard, 2026
 
@@ -18,11 +19,13 @@ if nargin < 1, EEG = []; end
 com = '';
 
 c = galea_colors();
-S = struct('file','', 'path','', 'EEG',[], 'ok',false, 'savePath','', 'eegRate',NaN);
+S = struct('file','', 'path','', 'EEG',[], 'ok',false, 'savePath','', ...
+    'eventsScanned',false);
+procOpt = [];                         % option set returned by the parameters dialog ([] = defaults)
 
 W = 860;
 scr = get(0,'ScreenSize');
-H = 720;                              % fixed, roomy: no cropping anywhere
+H = 760;                              % fixed, roomy: no cropping anywhere
 H = min(H, scr(4) - 80);
 f = figure('Name','Galea', 'NumberTitle','off', 'MenuBar','none', 'ToolBar','none', ...
     'Resize','off', 'Color',c.back, 'WindowStyle','modal', ...
@@ -65,118 +68,102 @@ y = y - 26;
 hFile = uicontrol(f,'style','text','string','no file selected','fontangle','italic', ...
     'horizontalalignment','left','backgroundcolor',c.back,'foregroundcolor',[.35 .1 .1], ...
     'position',[22 y RIGHT-22 20]);
-
-% ---------- 2. process ----------
-y = y - 38;
-hDo = uicontrol(f,'style','checkbox', ...
-    'string','2.  Process using the plugin''s custom methods (see Cannard 2026)', ...
-    'value',0,'fontweight','bold','fontsize',11,'position',[22 y 620 24], ...
-    'backgroundcolor',c.back,'foregroundcolor',c.text,'callback',@(~,~) toggle());
-
-procKids = gobjects(0);    % everything gated by the "2. Process" master box
-
-% ---- trim (common to every signal) ----
-% The section rule sits at the title's mid-height and runs the full width; the
-% title's opaque background masks the part behind it. Nothing else may share
-% this row, or the rule would run through it.
-y = y - 38; sepline(y+11);
-sec('Trim (all signals)', [22 y 200 22]);
-y = y - 34;
-procKids(end+1) = lbl('Pad (s):', [40 y 60 20]);
-hTrim = edt('3',[104 y-2 60 24]); procKids(end+1) = hTrim;
-y = y - 26;
-% Kept to ONE line on purpose: the line height here is 20px, so a wrapped
-% second line needs a 40px box and pushes the whole window down. Measured
-% width of this wording is ~777px in a 796px box.
-procKids(end+1) = lbl(['Data before the first event and after the last event, plus this pad, ' ...
-     'is removed, from the EEG and ALL auxiliary signals (PPG, EDA, EMG, IMU). ' ...
-     '0 = keep everything.'], [40 y 796 22], 'fontangle','italic','fontsize',8);
-
-% ---- processing parameters (separate dialog: EEG + other signals) ----
-y = y - 36;
-hParams = uicontrol(f,'style','pushbutton','string','Preprocessing parameters (EEG, PPG, EDA, EMG, IMU)...', ...
-    'position',[40 y 560 28],'backgroundcolor',c.btn,'callback',@(~,~) openParams());
-procKids(end+1) = hParams;
 y = y - 24;
-hRates = lbl('detected rates: -', [40 y 796 22], 'fontangle','italic','fontsize',8);
-procKids(end+1) = hRates;
-procOpt = [];    % full option set returned by the parameters dialog ([] = defaults)
+% progress line for the slow steps (marker scan, import): announcing them is
+% the whole point - without it the window just looks frozen.
+hStatus = lbl('', [40 y RIGHT-22 20], 'fontangle','italic','fontsize',8);
+y = y - 22;
+lbl('Montage:', [40 y 70 20]);
+hMont = uicontrol(f,'style','popupmenu','position',[120 y-2 340 24],'backgroundcolor',c.btn, ...
+    'string',{'default (10 EEG)','custom (12 EEG, Fp1/Fp2 from disc electrodes)'},'value',1, ...
+    'tooltipstring', ['Default: ExG 7-8 stay facial EMG. Custom: they become EEG at Fp1/Fp2 - ' ...
+    'only if reconfigured as EEG in the Galea software when recording.']);
+y = y - 20;
+lbl(['Default: ExG 7-8 stay facial EMG.  Custom: they become EEG at Fp1/Fp2 - ' ...
+     'only if reconfigured as EEG in the Galea software when recording.'], ...
+    [40 y 796 18], 'fontangle','italic','fontsize',8);
 
-% ---------- Continuous / ERP ----------
+% ---------- 2. data type ----------
 y = y - 38; sepline(y+11);
-sec('Data type', [22 y 200 22]);
+sec('2.  Data type', [22 y 200 22]);
 y = y - 34;
 hCont = uicontrol(f,'style','radiobutton','string','Continuous data (resting state, spectra)', ...
     'value',1,'position',[40 y 420 22], 'backgroundcolor',c.back,'foregroundcolor',c.text, ...
-    'callback',@(~,~) toggleMode());
+    'callback',@(~,~) onCont());
 hErp  = uicontrol(f,'style','radiobutton','string','ERP data (segment, clean, average)', ...
     'value',0,'position',[40 y-26 420 22], 'backgroundcolor',c.back,'foregroundcolor',c.text, ...
-    'callback',@(~,~) toggleMode());
-procKids = [procKids, hCont, hErp];
+    'callback',@(~,~) onErp());
 
-% The continuous and ERP blocks deliberately start on the SAME row: only one of
-% the two is ever visible, so stacking them keeps the window short. Every
-% control of a block - static labels included - must be collected in ck / ek,
-% or toggleMode cannot hide it and the two blocks overprint each other.
-yBlock = y - 60;
-
-% --- continuous-only controls ---
-ck = gobjects(0);
-ck(end+1) = lbl('2nd ASR pass, threshold (0 = skip):', [60 yBlock 260 20]);
-hAsr2 = edt('0', [330 yBlock-2 60 24]);
-ck(end+1) = hAsr2;
-ck(end+1) = lbl('mode:', [406 yBlock 45 20]);
-hAsr2Mode = uicontrol(f,'style','popupmenu','position',[454 yBlock-2 130 24],'backgroundcolor',c.btn, ...
-    'string',{'reconstruct','remove'},'value',1, 'tooltipstring', ...
-    ['reconstruct: flagged segments are interpolated (default, safest for ' ...
-     'continuous data). remove: the segments are deleted.']);
-ck(end+1) = hAsr2Mode;
-hSpectra = uicontrol(f,'style','checkbox', ...
-    'string','Plot power spectra of the whole recording (1-70 Hz) at the end', ...
-    'value',0,'position',[60 yBlock-31 520 22],'backgroundcolor',c.back,'foregroundcolor',c.text);
-ck(end+1) = hSpectra;
-
-% --- ERP-only controls, on the same rows ---
+% ERP-only controls, on their own rows below the radios. Visible only when
+% ERP is selected (toggleMode hides them for continuous data).
 ek = gobjects(0);
-yE = yBlock;
-ek(end+1) = lbl('Epoch window (s):', [60 yE 140 20]);
-hEpWin = edt('[-1.5 1.5]', [204 yE-2 120 24]);
+y = y - 60;
+ek(end+1) = lbl('Epoch window (s):', [60 y 140 20]);
+hEpWin = edt('[-1.5 1.5]', [204 y-2 120 24]);
 ek(end+1) = hEpWin;
-yE = yE - 30;
-hBtOn = chk('Reject bad trials', 0, [60 yE-1 180 22]);
+y = y - 30;
+hBtOn = chk('Reject bad trials', 0, [60 y-1 180 22]);
 ek(end+1) = hBtOn;
-ek(end+1) = lbl('sensitivity:', [250 yE 90 20]);
-hBtMethod = uicontrol(f,'style','popupmenu','position',[345 yE-2 200 24], ...
+ek(end+1) = lbl('sensitivity:', [250 y 90 20]);
+hBtMethod = uicontrol(f,'style','popupmenu','position',[345 y-2 200 24], ...
     'backgroundcolor',c.btn, 'string',{'conservative (mean)','medium (median)','aggressive (Grubbs)'}, ...
     'value',1, 'tooltipstring', ...
     ['conservative: mean-based outlier criterion, flags the fewest trials (default). ' ...
     'medium: median-based. aggressive: Grubbs outlier test, flags the most. ' ...
     'Amplitude and high-frequency-residual outliers across epochs (find_badTrials).']);
 ek(end+1) = hBtMethod;
-yE = yE - 30;
-ek(end+1) = lbl('Plot condition ERPs:', [60 yE 150 20]);
-hCond = uicontrol(f,'style','popupmenu','position',[220 yE-2 440 24],'backgroundcolor',c.btn, ...
+y = y - 30;
+ek(end+1) = lbl('Plot condition ERPs:', [60 y 150 20]);
+hCond = uicontrol(f,'style','popupmenu','position',[220 y-2 440 24],'backgroundcolor',c.btn, ...
     'string',{'(select a file to list its events)'}, ...
     'tooltipstring','Condition of interest for the ERP plot. The list comes from the markers in the selected file.');
 ek(end+1) = hCond;
 % NB: "plot EEG before / after cleaning" lives in the parameters dialog
-% (galea_process_gui, 'viseeg'). It used to be duplicated here and the copy was
-% never read, so the two could disagree. One owner only.
+% (galea_process_gui, 'viseeg'). One owner only.
 
-% both blocks are gated by the master box as well
-procKids = [procKids, ck, ek];
+% ---------- 3. preprocess ----------
+y = y - 38; sepline(y+11);
+sec('3.  Preprocess (Cannard 2026 methods)', [22 y 400 22]);
+y = y - 32;
+hPreYes = uicontrol(f,'style','radiobutton','string','Yes (recommended)', ...
+    'value',1,'position',[40 y 170 22], 'backgroundcolor',c.back,'foregroundcolor',c.text, ...
+    'callback',@(~,~) onPreYes());
+hPreNo  = uicontrol(f,'style','radiobutton','string','No (keep raw)', ...
+    'value',0,'position',[220 y 170 22], 'backgroundcolor',c.back,'foregroundcolor',c.text, ...
+    'callback',@(~,~) onPreNo());
+y = y - 26;
+lbl('Trim pad (s, 0 = keep all):', [60 y 170 20]);
+hTrim = edt('1', [240 y-2 60 24]);
+y = y - 26;
+% continuous-only rows: the second ASR pass and the spectra plot make no
+% sense for ERP data, so they are hidden unless Continuous is selected.
+ck = gobjects(0);
+ck(end+1) = lbl('2nd ASR pass, threshold (0 = skip):', [60 y 260 20]);
+hAsr2 = edt('0', [330 y-2 60 24]);
+ck(end+1) = hAsr2;
+ck(end+1) = lbl('mode:', [406 y 45 20]);
+hAsr2Mode = uicontrol(f,'style','popupmenu','position',[454 y-2 130 24],'backgroundcolor',c.btn, ...
+    'string',{'reconstruct','remove'},'value',1, 'tooltipstring', ...
+    ['reconstruct: flagged segments are interpolated (default, safest for ' ...
+     'continuous data). remove: the segments are deleted.']);
+ck(end+1) = hAsr2Mode;
+y = y - 24;
+hSpectra = uicontrol(f,'style','checkbox', ...
+    'string','Plot power spectra of the whole recording (1-70 Hz) at the end', ...
+    'value',0,'position',[60 y 520 22],'backgroundcolor',c.back,'foregroundcolor',c.text);
+ck(end+1) = hSpectra;
+y = y - 26;
+hPreNote = lbl(['Pressing Run imports the file, then opens the preprocessing options ' ...
+     '(EEG, PPG, EDA, EMG, IMU).'], [40 y 796 22], 'fontangle','italic','fontsize',8);
 
 % ---------- output ----------
-% yE is the last ERP row; the ERP block is the taller of the two, so starting
-% the Output section from it clears both.
-y = yE - 16; sepline(y);
+y = y - 16; sepline(y);
 y = y - 32;
 hSave = chk('Save the processed dataset to a .set file when done', 0, [40 y 430 24]);
-hSaveFile = uicontrol(f,'style','pushbutton','string','Save as...', ...
+uicontrol(f,'style','pushbutton','string','Save as...', ...
     'position',[RIGHT-118 y-2 118 26],'backgroundcolor',c.btn, 'callback',@(~,~) onPickSave());
 hSavePath = lbl('', [40 y-24 796 22], 'fontangle','italic','fontsize',8);
 S.savePath = '';
-procKids = [procKids, hSave, hSaveFile, hSavePath];
 
 % ---------- buttons ----------
 uicontrol(f,'style','pushbutton','string','Help','position',[22 18 80 30], ...
@@ -186,7 +173,8 @@ uicontrol(f,'style','pushbutton','string','Cancel','position',[RIGHT-198 18 85 3
 hRun = uicontrol(f,'style','pushbutton','string','Run','position',[RIGHT-93 18 93 30], ...
     'fontweight','bold','backgroundcolor',c.btn,'enable','off','callback',@(~,~) onRun());
 
-toggle();
+toggleMode();
+gatePre();
 uiwait(f);
 
 if ~isempty(S.EEG) && S.ok
@@ -215,25 +203,60 @@ end
         uicontrol(f,'style','frame','position',[22 yy W-44 1], ...
             'foregroundcolor',[.45 .5 .68],'backgroundcolor',[.45 .5 .68]);
     end
-
-    function toggle()
-        % Master box gates everything below it.
-        on = logical(get(hDo,'value'));
-        set(procKids(isgraphics(procKids)), 'enable', onoff(on));
-        toggleMode();
-    end
     function s = onoff(tf)
         if tf, s = 'on'; else, s = 'off'; end
     end
-
-    function toggleMode()
-        % Continuous vs ERP: show that side's controls, grey the other side.
-        cont = logical(get(hCont,'value'));
-        set(ck(isgraphics(ck)), 'visible', onoffstr(cont));
-        set(ek(isgraphics(ek)),  'visible', onoffstr(~cont));
-    end
     function s = onoffstr(tf)
         if tf, s = 'on'; else, s = 'off'; end
+    end
+
+    function onCont()
+        % radio behaviour is NOT automatic outside a uibuttongroup: clear the
+        % sibling explicitly, then re-gate the visible blocks
+        set(hErp, 'value', 0);
+        toggleMode();
+    end
+
+    function onErp()
+        set(hCont, 'value', 0);
+        toggleMode();
+    end
+
+    function toggleMode()
+        % Continuous vs ERP: show that side's controls, hide the other side.
+        % Selecting ERP needs the marker list (a slow full import), so the
+        % scan starts here, the moment ERP is chosen with a file selected.
+        cont = logical(get(hCont,'value'));
+        set(ek(isgraphics(ek)), 'visible', onoffstr(~cont));   % ERP block: ERP only
+        set(ck(isgraphics(ck)), 'visible', onoffstr(cont));    % continuous block only
+        if ~cont && ~isempty(S.file) && ~S.eventsScanned
+            scanEvents();
+        end
+        gatePre();
+    end
+
+    function onPreYes()
+        % radio behaviour is NOT automatic outside a uibuttongroup: clear the
+        % sibling explicitly, then re-gate
+        set(hPreNo, 'value', 0);
+        gatePre();
+    end
+
+    function onPreNo()
+        set(hPreYes, 'value', 0);
+        gatePre();
+    end
+
+    function gatePre()
+        % These only act when preprocessing runs: grey them out for "No".
+        on = logical(get(hPreYes,'value'));
+        kids = [hTrim, hAsr2, hAsr2Mode, hSpectra];
+        set(kids(isgraphics(kids)), 'enable', onoff(on));
+        if on
+            set(hPreNote, 'foregroundcolor', c.text);
+        else
+            set(hPreNote, 'foregroundcolor', c.text * 0.55);   % dimmed
+        end
     end
 
     function v = asr2Value()
@@ -272,31 +295,42 @@ end
         set(hFile, 'string', ['selected:  ' fn '    (+ ' aux ')'], 'foregroundcolor',c.text);
         set(hRun,'enable','on');
 
-        % Probe the sampling rates; fill the condition list from the markers.
-        try
-            rates = galea_probe_rates(fn, fp);
-            if isfinite(rates.eeg)
-                S.eegRate = rates.eeg;
-                if ~isempty(procOpt)
-                    procOpt.resample = rates.eeg;
-                end
-            end
-            if isfinite(rates.ppg)
-                set(hRates, 'string', sprintf(['detected rates:  EEG %g Hz   |   ' ...
-                    'PPG/EDA/EMG/IMU %g Hz'], rates.eeg, rates.ppg), 'foregroundcolor', c.text);
-            end
-        catch
-            % rate probe is a convenience only; never block file selection on it
+        % Nothing is imported here: reading a recording takes seconds, so the
+        % marker scan is deferred until the ERP condition list needs it (or
+        % Run). Reset any list from a previously selected file.
+        S.eventsScanned = false;
+        set(hStatus,'string','','foregroundcolor',c.text);
+        set(hCond,'string',{'(select a file to list its events)'},'value',1);
+        if logical(get(hErp,'value'))
+            scanEvents();
         end
+    end
+
+    function scanEvents()
+        % Listing the markers runs a full import (the only way to read them),
+        % which is slow on long recordings - so it runs only when the ERP
+        % condition list needs it, and says so while it works.
+        set(hStatus,'string','Importing data and converting to EEGLAB format...', ...
+            'foregroundcolor',c.text);
+        drawnow
         try
-            ev = galea_list_events(fn, fp);
-            if ~isempty(ev)
-                set(hCond, 'string', [{'(none)'}, ev], 'value', 1);
+            ev = galea_list_events(S.file, S.path);
+            if isempty(ev)
+                set(hCond,'string',{'(no markers in this file)'},'value',1);
+                set(hStatus,'string', ...
+                    'Data imported successfully into EEGLAB (no event markers found).', ...
+                    'foregroundcolor',c.text);
             else
-                set(hCond, 'string', {'(no markers in this file)'}, 'value', 1);
+                set(hCond,'string',[{'(none)'}, ev], 'value',1);
+                set(hStatus,'string', ...
+                    sprintf('Data imported successfully into EEGLAB (%g marker types found).', ...
+                    numel(ev)), 'foregroundcolor',c.text);
             end
+            S.eventsScanned = true;
         catch
-            set(hCond, 'string', {'(event list unavailable)'}, 'value', 1);
+            set(hCond,'string',{'(event list unavailable)'},'value',1);
+            set(hStatus,'string','Could not read the event list from this file.', ...
+                'foregroundcolor',[.55 .1 .1]);
         end
     end
 
@@ -309,84 +343,75 @@ end
         set(hSave, 'value', 1);
     end
 
-    function openParams()
-        % All processing parameters (EEG and other signals alike) in one
-        % dialog. Values persist for the session. Starts from the current
-        % set, then the detected EEG rate.
-        def = galea_process_defaults();
-        if ~isempty(procOpt)
-            fn = fieldnames(procOpt);
-            for iF = 1:numel(fn), def.(fn{iF}) = procOpt.(fn{iF}); end
-        end
-        if isfinite(S.eegRate), def.srate = S.eegRate; end
-        res = galea_process_gui(def);
-        if ~isempty(res), procOpt = res; end
-    end
-
     function onRun()
         if isempty(S.file)
             warndlg('Select a file first.','Galea'); return
         end
         set(f,'pointer','watch'); drawnow
+        set(hStatus,'string','Importing data and converting to EEGLAB format...', ...
+            'foregroundcolor',c.text); drawnow
 
-        % resolve the montage + processing options
-        if isempty(procOpt)
-            opt = galea_process_defaults();
-        else
-            opt = procOpt;
-        end
-        % The main window owns three parameters that are NOT in the
-        % parameters dialog: the common trim pad, and (continuous only) the
-        % second ASR pass. Read them here or the controls do nothing.
-        trimPad = str2double(get(hTrim,'string'));
-        if isfinite(trimPad) && trimPad >= 0, opt.trim = trimPad; end
-        if logical(get(hCont,'value'))
-            opt.asr2 = asr2Value();
-            modes = get(hAsr2Mode,'string');
-            opt.asr2mode = modes{get(hAsr2Mode,'value')};
-        else
-            opt.asr2 = 0;                 % the 2nd pass is a continuous-data step
-            opt.asr2mode = 'reconstruct';
+        isErp = logical(get(hErp,'value'));
+        doPre = logical(get(hPreYes,'value'));
+
+        % ERP mode needs the marker list (a full import) before the options
+        if isErp && ~S.eventsScanned
+            scanEvents();
         end
 
+        % ---- import (via pop_galea_import so the non-EEG streams land in
+        %      EEG.etc.galea) ----
+        % the popup shows long labels; galea_import matches the short keys
+        montKeys = {'default', 'custom'};
+        montKey = montKeys{get(hMont,'value')};
         try
-            % via pop_galea_import so the non-EEG streams land in EEG.etc.galea
-            D = pop_galea_import('montage', opt.montage, ...
+            D = pop_galea_import('montage', montKey, ...
                 'filename', S.file, 'filepath', S.path);
         catch ME
             set(f,'pointer','arrow');
+            set(hStatus,'string','Import failed.','foregroundcolor',[.55 .1 .1]);
             errordlg(sprintf('Import failed: %s', ME.message), 'Galea'); return
         end
+        set(hStatus,'string','Data imported successfully into EEGLAB.','foregroundcolor',c.text);
 
-        % collect the process flag now, then CLOSE the GUI before processing:
-        % the IC topographies / trim overview / before-after figures must be
-        % interactive, and a modal window left open sits on top of them.
-        doProcess = logical(get(hDo,'value'));
-        isErp     = logical(get(hErp,'value'));
-
-        % drop the GUI-only keys, pass the rest to pop_galea_preprocess
-        procKeys = opt;
-        procKeys = rmfield(procKeys, 'montage');
-        if ~isfield(procKeys, 'asr2'),      procKeys.asr2 = 0; end
-        if ~isfield(procKeys, 'asr2mode'),  procKeys.asr2mode = 'reconstruct'; end
-
-        close(f);   % GUI done; figures raised by processing now stack normally
-
-        if doProcess
-            args = [fieldnames(procKeys), struct2cell(procKeys)]';
-            try
-                D = pop_galea_preprocess(D, args{:});
-            catch ME
-                errordlg(sprintf('Processing failed: %s', ME.message), 'Galea');
+        % ---- preprocessing options: pop up after Run, when Yes ----
+        opt = struct();
+        if doPre
+            def = galea_process_defaults();
+            if ~isempty(procOpt)
+                fn = fieldnames(procOpt);
+                for iF = 1:numel(fn), def.(fn{iF}) = procOpt.(fn{iF}); end
+            end
+            def.montage = montKey;
+            def.srate   = D.srate;    % true rate, for the Downsample list
+            res = galea_process_gui(def);
+            if isempty(res)
+                set(f,'pointer','arrow');
+                set(hStatus,'string','Cancelled - preprocessing options were closed.', ...
+                    'foregroundcolor',[.55 .1 .1]);
                 return
+            end
+            procOpt = res;
+            opt = res;
+            % keys the dialog carries that pop_galea_preprocess must not see
+            for drop = {'srate','montage'}
+                if isfield(opt, drop{1}), opt = rmfield(opt, drop{1}); end
             end
         end
 
-        % ---- continuous vs ERP ----
-        if ~doProcess
-            S.EEG = D; S.ok = true; return
+        % the main window owns four parameters the dialog never sees: the
+        % common trim pad, the 2nd ASR pass and the spectra plot (continuous
+        % only), and the ERP options
+        opt.trim = str2double(get(hTrim,'string'));
+        if ~isfinite(opt.trim) || opt.trim < 0, opt.trim = 3; end
+        if isErp
+            opt.asr2 = 0;                 % the 2nd pass is a continuous-data step
+            opt.asr2mode = 'reconstruct';
+        else
+            opt.asr2 = asr2Value();
+            modes = get(hAsr2Mode,'string');
+            opt.asr2mode = modes{get(hAsr2Mode,'value')};
         end
-
         if isErp
             opt.trimWindow = str2num(get(hEpWin,'string')); %#ok<ST2NM> % e.g. [-1.5 1.5]
             condList = get(hCond,'string');
@@ -398,21 +423,10 @@ end
             S.btOn = logical(get(hBtOn,'value'));
             btNames = {'mean','median','grubbs'};
             S.btMethod = btNames{get(hBtMethod,'value')};
-            D = galea_erp_workflow(D, opt, S);
-        else
-            if logical(get(hSpectra,'value')) && usejava('desktop')
-                try
-                    figure('Color','w');
-                    pop_spectopo(D, 1, [], 'EEG', 'freq', [6 10 22], ...
-                        'freqrange',[1 70], 'electrodes','off');
-                    title('Spectra, 1-70 Hz');
-                catch ME
-                    fprintf(2, 'Spectra plot failed: %s\n', ME.message);
-                end
-            end
         end
 
-        % optional save, requested in the Output section
+        % flags read before the window closes
+        plotSpectra = ~isErp && logical(get(hSpectra,'value'));
         saveIt = logical(get(hSave,'value'));
         if saveIt && isempty(S.savePath)
             try
@@ -421,6 +435,37 @@ end
                 S.savePath = fullfile(pwd, 'galea_processed.set');
             end
         end
+
+        % close BEFORE processing: the IC topographies / trim overview /
+        % before-after figures must be interactive, and a modal window left
+        % open sits on top of them.
+        close(f);
+
+        if doPre
+            args = [fieldnames(opt), struct2cell(opt)];
+            try
+                D = pop_galea_preprocess(D, args{:});
+            catch ME
+                errordlg(sprintf('Processing failed: %s', ME.message), 'Galea');
+                return
+            end
+        end
+
+        % ---- continuous vs ERP ----
+        if isErp
+            D = galea_erp_workflow(D, opt, S);
+        elseif plotSpectra && usejava('desktop')
+            try
+                figure('Color','w');
+                pop_spectopo(D, 1, [], 'EEG', 'freq', [6 10 22], ...
+                    'freqrange',[1 70], 'electrodes','off');
+                title('Spectra, 1-70 Hz');
+            catch ME
+                fprintf(2, 'Spectra plot failed: %s\n', ME.message);
+            end
+        end
+
+        % optional save, requested in the Output section
         if saveIt
             try
                 D = pop_saveset(D, 'filename', S.savePath);

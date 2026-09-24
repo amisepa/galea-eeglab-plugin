@@ -8,8 +8,9 @@ function EEG = galea_erp_workflow(EEG, opt, S)
 % The ERP branch of the main Galea window, after the continuous processing
 % has run. Segments around the markers in the file, optionally rejects bad
 % trials (find_badTrials: amplitude + high-frequency residual outliers), and
-% plots the conditions of interest as 20% trimmed means +/- SEM, the robust
-% summary used in the Cannard pipeline.
+% plots the conditions of interest as 20% trimmed means +/- SEM (the robust
+% summary used in the Cannard pipeline) plus each condition's single-trial
+% ERP image (erpimage).
 %
 % OPT needs 'trimWindow' ([pre post] seconds) and 'plotConds' (cell of event
 % labels or {}). S carries 'btOn' and 'btMethod'.
@@ -40,7 +41,7 @@ if isfield(S,'btOn') && S.btOn
         bad = find_badTrials(EEG, method, false);
         if ~isempty(bad)
             fprintf('Removing %g bad epochs (%s criterion).\n', numel(bad), method);
-            EEG = pop_select(EEG, 'noepoch', bad);
+            EEG = pop_select(EEG, 'notrial', bad);
         else
             fprintf('Bad-trial detection: no bad epochs found.\n');
         end
@@ -69,6 +70,22 @@ for k = 1:numel(conds)
         continue
     end
     SET = pop_select(EEG, 'trial', idx);
+
+    % single-trial ERP image (EEGLAB erpimage): one row per trial, the
+    % condition's mean ERP underneath. The "nice single-trials plot" - it
+    % shows the trial-to-trial variability that the average hides. Plotted
+    % on the mean across channels so one image summarizes the condition.
+    try
+        meanChan = squeeze(mean(SET.data, 1));        % (time, trials)
+        figure('Color','w');
+        erpimage(meanChan, 1:size(meanChan,2), ...
+            linspace(SET.xmin*1000, SET.xmax*1000, SET.pnts), ...
+            sprintf('%s: single trials (mean across channels)', conds{k}), 5, 0, ...
+            'erp', 'on', 'cbar', 'on');
+    catch ME
+        fprintf(2, 'Single-trial ERP image failed (%s): %s\n', conds{k}, ME.message);
+    end
+
     % per-channel trimmed mean, then across channels: robust to artefact
     % epochs that survived rejection
     trimERP = zeros(SET.nbchan, numel(times));
