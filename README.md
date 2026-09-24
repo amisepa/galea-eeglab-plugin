@@ -16,8 +16,9 @@ for **galea**, and install.
 
 **From this repository:** copy or clone this folder into `eeglab/plugins/` and
 restart EEGLAB. Either way, a single **Galea** entry appears in the EEGLAB menu
-bar. It opens one window that does everything, top to bottom: load a recording
-(step 1), then optionally process it (step 2), one section per modality.
+bar. It opens the main window (file, montage, data type, preprocess yes/no);
+**Next** imports the recording and opens the processing parameters, one
+section per signal, and **Run** there starts the processing.
 
 Dependencies: none for import/EEG processing. The optional PPG (heart-rate)
 branch uses the [BrainBeats](https://github.com/sccn/brainbeats) plugin; the
@@ -29,7 +30,7 @@ Standard EEGLAB import and cleaning routines assume a gel-based, high-density
 montage and a nominal sampling rate. Galea recordings break three of those
 assumptions, and this plugin handles each one.
 
-**`pop_galea`** (the menu entry, one window):
+**`pop_galea`** (the menu entry):
 
 - **Load** — reads the plain-text files written by the Galea/OpenBCI GUI. A
   recording is a pair (`OpenBCI-RAW-<date>.txt` with EEG/EOG/EMG +
@@ -45,7 +46,8 @@ assumptions, and this plugin handles each one.
   EMG disc electrodes reconfigured as Fp1/Fp2) are supported, and the numeric
   trigger codes are converted into readable event labels for the VR driving
   paradigm.
-- **Process** (all optional, per-modality switches):
+- **Process** (second window; all optional, per-signal switches, every signal
+  on by default):
   - *Trim* — drops the head and tail of the recording around the first and
     last event, for the EEG **and** all auxiliary signals, each at its own
     sampling rate.
@@ -65,9 +67,12 @@ assumptions, and this plugin handles each one.
   - *ASR* with remove (default) or reconstruct mode, plus an optional second,
     stricter pass after ICA.
   - *ICA* with ocular-component removal (eyes-open tasks only).
-  - *Peripheral branches* (separate dialog): PPG through BrainBeats with RR
-    artefact correction and HRV features, EDA tonic/phasic, EMG envelope,
-    IMU magnitude.
+  - *ERP epoching* (ERP data only): epoch window, bad-trial rejection
+    (mean, median or Grubbs outlier criterion), and a condition plot
+    (20% trimmed-mean ERP +/- SEM with its single-trial ERP image).
+  - *Other signals*, in the same window: EOG with blink detection, PPG
+    through BrainBeats with RR artefact correction and HRV features, EDA
+    tonic/phasic, EMG envelope, IMU magnitude.
 
 ## Tutorial
 
@@ -107,8 +112,6 @@ scripts. The GUIs and the script interface take identical options.
 
 - `find_badTrials.m` — epoch rejection by amplitude and high-frequency
   residual, using a mean-based outlier criterion.
-- `capture_gui_screenshots.m` — regeneration of the GUI screenshots in
-  `figures/` (requires the MATLAB desktop).
 
 ## Citation
 

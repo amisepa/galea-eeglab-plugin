@@ -3,8 +3,9 @@
 function [EEG, com] = pop_galea_preprocess(EEG, varargin)
 % POP_GALEA_PREPROCESS  Clean continuous Galea data (Cannard 2026 methods).
 %
-% Runs on CONTINUOUS data. Epoching and ERPs come afterwards from the standard
-% EEGLAB menus; tutorial_galea.m shows the whole route.
+% Runs on CONTINUOUS data. For ERP data, pop_galea then segments, rejects bad
+% trials and plots the conditions (galea_erp_workflow); tutorial_galea.m shows
+% the same route from the command line.
 %
 % EEG steps, each optional:
 %   0. Trim. Drop the data before the first event (minus a pad, default 3 s)
@@ -31,7 +32,7 @@ function [EEG, com] = pop_galea_preprocess(EEG, varargin)
 % PPG is handled separately, through the BrainBeats plugin.
 %
 % Usage:
-%   >> EEG = pop_galea_preprocess(EEG);                       % GUI
+%   >> EEG = pop_galea_preprocess(EEG);        % GUI (processing parameters window)
 %   >> EEG = pop_galea_preprocess(EEG, 'asr', 100, 'ica', true);
 %
 % EEG key/value (defaults in brackets):
@@ -55,6 +56,7 @@ function [EEG, com] = pop_galea_preprocess(EEG, varargin)
 %              (command line only; the GUI always asks)
 %   'asr2'     second ASR pass after ICA, 0 = skip  [0]
 %   'asr2mode' 'reconstruct' (default) or 'remove' for the second pass
+%   'plotspectra' plot pop_spectopo (1-70 Hz) at the end of EEG cleaning [false]
 %   'viseeg'   plot the EEG before / after          [true]
 %   'badtrials' / 'badtrialmethod' - accepted and ignored here: bad-trial
 %              rejection is applied by pop_galea AFTER epoching (find_badTrials).
@@ -109,13 +111,20 @@ function [EEG, com] = pop_galea_preprocess(EEG, varargin)
 com = '';
 if nargin < 1, help pop_galea_preprocess; return; end
 
+% 'eeglab nogui' puts the plugin folder on the path but not functions/
+% (only the menu registration in eegplugin_galea adds it), so scripts need this.
+if ~exist('galea_import', 'file')
+    addpath(fullfile(fileparts(mfilename('fullpath')), 'functions'));
+end
+
 hasPPG = isfield(EEG.etc,'galea') && isfield(EEG.etc.galea,'PPG') && ...
          ~isempty(EEG.etc.galea.PPG) && EEG.etc.galea.PPG.nbchan > 0;
 hasEvents = ~isempty(EEG.event);
 
 g = struct('eeg',true, 'trim',1, 'resample',0, 'locut',0.5, 'hicut',30, 'causal',true, ...
            'polarity',false, 'badchan',true, 'mincorr',0.55, 'maxtol',0.30, 'interpchan',true, ...
-           'asr',100, 'asrmode','remove', 'ica',true, 'icaconfirm',true, 'asr2',0, 'asr2mode','reconstruct', 'viseeg',true, ...
+           'asr',100, 'asrmode','remove', 'ica',true, 'icaconfirm',true, 'asr2',0, 'asr2mode','reconstruct', ...
+           'plotspectra',false, 'viseeg',true, ...
            'eog',true, 'eoglocut',0.5, 'eoghicut',20, 'viseog',true, ...
            'ppg',hasPPG, 'ppglocut',0.5, 'ppghicut',3, 'ppgdetect','valleys', ...
            'rrcorrect','pchip', ...   % BrainBeats RR interpolation; pchip by default, command line only
@@ -125,18 +134,33 @@ g = struct('eeg',true, 'trim',1, 'resample',0, 'locut',0.5, 'hicut',30, 'causal'
            'emg',false, 'emglocut',20, 'emghicut',0, 'emgenvelope',true, 'visemg',true, ...
            'imu',false, 'imuhicut',10, 'imumagnitude',true, 'visimu',true);
 
-% GUI-only keys the dialogs may carry; accepted and ignored here (the data
-% type drives them in pop_galea).
-guiOnly = {'srate','montage','erp','trimWindow','plotConds'};
+% Keys the parameters window carries that are not used here: its own flags
+% and the ERP options (galea_erp_workflow reads those). Accepted and ignored.
+guiOnly = {'srate','montage','erp','preprocess','epochwin','erpevents', ...
+           'rejtrials','rejmethod','plotconds','trimwindow'};
 if nargin > 1
     for i = 1:2:numel(varargin)
+        if ~ischar(varargin{i})
+            error(['Options are name/value pairs: argument %d should be an option ' ...
+                   'name but is a %s.'], i + 1, class(varargin{i}));
+        end
         key = lower(varargin{i});
         if any(strcmp(key, guiOnly)), continue; end
         g.(key) = varargin{i+1};
     end
 else
-    g = galea_preproc_gui(g, hasPPG, hasEvents, EEG.srate);
-    if isempty(g), return; end
+    % GUI: the same processing-parameters window pop_galea opens
+    def = galea_process_defaults();
+    def.srate = EEG.srate;                  % true rate, for the Downsample list
+    if isfield(EEG.etc,'galea') && isfield(EEG.etc.galea,'montage')
+        def.montage = EEG.etc.galea.montage;
+    end
+    res = galea_process_gui(def, EEG);
+    if isempty(res), return; end            % cancelled
+    fn = fieldnames(res);
+    for i = 1:numel(fn)
+        if ~any(strcmp(lower(fn{i}), guiOnly)), g.(lower(fn{i})) = res.(fn{i}); end
+    end
 end
 
 oriEEG = EEG;
@@ -324,6 +348,18 @@ if g.asr2 > 0
     end
 end
 
+% ---- optional power-spectra plot of the whole recording ----
+if g.plotspectra && usejava('desktop')
+    try
+        figure('Color','w');
+        pop_spectopo(EEG, 1, [], 'EEG', 'freq', [6 10 22], ...
+            'freqrange',[1 70], 'electrodes','off');
+        title('Spectra, 1-70 Hz');
+    catch ME
+        fprintf(2, 'Spectra plot failed: %s\n', ME.message);
+    end
+end
+
 % ---- before / after ----
 if g.viseeg && (g.asr > 0 || g.ica || g.asr2 > 0)
     % vis_artifacts overlays the two datasets, so it needs identical sample
@@ -354,282 +390,13 @@ EEG = eeg_checkset(EEG);
 
 com = sprintf(['EEG = pop_galea_preprocess(EEG, ''trim'',%g, ''resample'',%g, ''locut'',%g, ''hicut'',%g, ' ...
     '''causal'',%d, ''polarity'',%d, ''badchan'',%d, ''mincorr'',%g, ''maxtol'',%g, ' ...
-    '''asr'',%g, ''asrmode'',''%s'', ''ica'',%d, ''asr2'',%g, ''asr2mode'',''%s'', ''ppg'',%d);'], ...
+    '''asr'',%g, ''asrmode'',''%s'', ''ica'',%d, ''asr2'',%g, ''asr2mode'',''%s'', ''plotspectra'',%d, ''ppg'',%d);'], ...
     g.trim, g.resample, g.locut, g.hicut, g.causal, g.polarity, g.badchan, ...
-    g.mincorr, g.maxtol, g.asr, g.asrmode, g.ica, g.asr2, g.asr2mode, g.ppg);
+    g.mincorr, g.maxtol, g.asr, g.asrmode, g.ica, g.asr2, g.asr2mode, g.plotspectra, g.ppg);
 
 end
 
 % ===========================================================================
-function g = galea_preproc_gui(g, hasPPG, hasEvents, srate)
-% Custom figure rather than inputgui(), so the window can be wide enough to
-% read and the PPG block can be visibly separate from the EEG one. Each
-% modality has a "process" checkbox; unchecking it greys out (disables) that
-% whole section, checking it re-enables the section.
-%
-% The window sizes itself to its content and clamps to the screen, so nothing
-% is cropped on any display: layout is built from the top, the final content
-% height is known, and H is set from it before the figure properties are
-% applied.
-
-c = galea_colors();   % EEGLAB house colours (icadefs is a script and cannot run in a static workspace)
-
-W = 680;
-scr = get(0, 'ScreenSize');
-
-% ---- layout pass: measure the content height first ----
-H = measure_layout(hasPPG, hasEvents, srate);
-H = min(H, scr(4) - 80);          % never taller than the screen
-
-f = figure('Name','Preprocess Galea data', 'NumberTitle','off', 'MenuBar','none', ...
-    'ToolBar','none', 'Resize','off', 'Color',c.back, ...
-    'Position',[(scr(3)-W)/2 max(20,(scr(4)-H)/2) W H], 'WindowStyle','modal');
-
-    function h = txt(str, pos, varargin)
-        h = uicontrol(f,'style','text','string',str,'position',pos, ...
-            'horizontalalignment','left','backgroundcolor',c.back, ...
-            'foregroundcolor',c.text, varargin{:});
-    end
-    function h = ed(str, pos)
-        h = uicontrol(f,'style','edit','string',str,'position',pos, ...
-            'backgroundcolor',c.btn);
-    end
-    function h = cb(str, val, pos, varargin)
-        h = uicontrol(f,'style','checkbox','string',str,'value',val,'position',pos, ...
-            'backgroundcolor',c.back,'foregroundcolor',c.text, varargin{:});
-    end
-    function sep(y)
-        uicontrol(f,'style','frame','position',[20 y W-40 1], ...
-            'foregroundcolor',[.4 .45 .6],'backgroundcolor',[.4 .45 .6]);
-    end
-
-eegKids  = gobjects(0);   % controls gated by the EEG "process" box
-
-% ---------------- trim (global, all signals) ----------------
-y = H - 40;
-txt('Trim', [20 y 120 22], 'fontweight','bold','fontsize',11);
-y = y - 28;
-if hasEvents
-    txt('Data before the first event and after the last event, plus the pad, is', [20 y W-40 20]);
-    y = y - 18;
-    txt('removed. Applies to the EEG and ALL auxiliary signals (PPG, EDA, EMG, IMU).', [20 y W-40 20]);
-    y = y - 22;
-    txt('Trim pad (s, 0 = keep all):', [20 y 250 20]);  hTrim = ed('1', [300 y 70 24]);
-else
-    txt('No events in this dataset; nothing to trim.', [20 y W-40 20], 'fontangle','italic');
-    hTrim = ed('0', [300 y 70 24]);
-    set(hTrim, 'enable', 'off');
-end
-y = y - 20; sep(y);
-
-% ---------------- EEG ----------------
-y = y - 26;
-hEegBox = cb('Process EEG', 1, [20 y 200 22], 'fontweight','bold','fontsize',11, ...
-    'callback',@(~,~) gateEEG());
-y = y - 26;
-txt('Downsample to (Hz, 0 = keep):', [40 y 250 20]);  hRes  = ed('0', [300 y 70 24]);
-eegKids(end+1) = hRes;
-txt(sprintf('current rate: %g Hz', srate), [378 y 110 20], 'fontangle', 'italic', 'fontsize', 8);
-hDiv = uicontrol(f,'style','popupmenu','position',[494 y 60 24], 'backgroundcolor', c.btn, ...
-    'string', {'/1','/2','/4'}, 'value', 1, ...
-    'tooltipstring', ['Fill the Downsample box with the current rate divided by 1, 2 or 4 '
-    '(e.g. 500 > 250 > 125). Dividing the rate avoids resampling artefacts at non-integer ratios.'], ...
-    'callback', @(h,~) onDiv());
-eegKids(end+1) = hDiv;
-    function onDiv()
-        % Fill the Downsample box with srate / 1, / 2 or / 4 (integer division
-        % keeps downsampling artefact-free).
-        d = [1 2 4];
-        set(hRes, 'string', sprintf('%g', srate / d(get(hDiv, 'value'))));
-    end %#ok<*AGROW>
-y = y - 26;
-txt('Bandpass (Hz):', [40 y 100 20]);
-hLo = ed('0.5', [145 y 60 24]);  txt('to', [212 y 20 20]);  hHi = ed('30', [238 y 60 24]);
-hCaus = cb('minimum-phase causal filter (only for pre-stimulus analyses)', 0, ...
-    [310 y W-340 22]);
-eegKids(end+1) = hLo; eegKids(end+1) = hHi; eegKids(end+1) = hCaus;
-y = y - 24;
-hPol  = cb('Correct Fp1/Fp2 polarity (custom montage with disc electrodes)', 0, [40 y W-70 22]);
-eegKids(end+1) = hPol;
-
-y = y - 28;
-hBad = cb('Detect bad channels', 1, [40 y 200 22]);
-eegKids(end+1) = hBad;
-y = y - 24;
-txt('Channel cross-correlation threshold (lax 0.35 - aggressive 0.85):', [40 y 340 20]);
-hCorr = ed('0.55', [385 y 70 24]);
-eegKids(end+1) = hCorr;
-y = y - 24;
-txt('Max % of windows a channel may fail before removal (5-50%):', [40 y 340 20]);
-hMaxTol = ed('30', [385 y 70 24]);
-eegKids(end+1) = hMaxTol;
-y = y - 26;
-hInterp = cb('Interpolate the detected bad channels', 0, [40 y 320 22]);
-eegKids(end+1) = hInterp;
-y = y - 26;
-hAsr = cb('ASR 1st pass', 1, [40 y 140 22]);
-eegKids(end+1) = hAsr;
-hAsrTh = ed('100', [185 y 70 24]);
-eegKids(end+1) = hAsrTh;
-hAsrMode = uicontrol(f,'style','popupmenu','position',[265 y 110 24], ...
-    'backgroundcolor',c.btn, 'string',{'reconstruct','remove'},'value',2, ...
-    'tooltipstring', ['remove: flagged segments are deleted (default; event markers inside them are ' ...
-    'listed and stored). reconstruct: flagged segments are interpolated instead.']);
-eegKids(end+1) = hAsrMode;
-y = y - 20;
-txt('     Lenient first pass so ICA can still separate the blink source.', [40 y W-70 18], ...
-    'fontangle','italic','fontsize',8);
-
-y = y - 22;
-hIca  = cb('ICA: Extract the most likely eye component (eyes-open data; visual check and confirmation required)', ...
-    1, [40 y W-70 22]);
-eegKids(end+1) = hIca;
-y = y - 22;
-txt('ASR pass after ICA (0 = skip):', [40 y 250 20]);  hAsr2 = ed('0', [300 y 70 24]);
-eegKids(end+1) = hAsr2;
-txt('mode:', [376 y 40 20]);
-hAsr2Mode = uicontrol(f,'style','popupmenu','position',[415 y 110 24], ...
-    'backgroundcolor',c.btn, 'string',{'reconstruct','remove'},'value',1, ...
-    'tooltipstring', ['reconstruct: flagged segments are interpolated (default, safest for ' ...
-    'continuous data). remove: the segments are deleted and any event markers inside them are lost.']);
-eegKids(end+1) = hAsr2Mode;
-y = y - 20;
-txt('     Optional stricter cleanup (e.g. 20) once the eye-blink source has', [40 y W-70 18], ...
-    'fontangle','italic','fontsize',8);
-y = y - 16;
-txt('     been subtracted and can no longer be damaged.', [40 y W-70 18], ...
-    'fontangle','italic','fontsize',8);
-y = y - 20;
-hVisE = cb('Plot the EEG before / after cleaning', 1, [40 y 300 22]);
-eegKids(end+1) = hVisE;
-
-y = y - 18; sep(y);
-
-% ---------------- peripheral signals (separate dialog) ----------------
-y = y - 26;
-uicontrol(f,'style','pushbutton','string','Set EOG / PPG / EDA / EMG / IMU options...', ...
-    'position',[20 y W-40 28],'backgroundcolor',c.btn,'callback',@(~,~) openPeriph());
-if ~hasPPG
-    txt('no PPG stream in this dataset', [20 y-24 300 20], 'fontangle','italic');
-end
-perOpt = [];   % options returned by the peripheral dialog ([] = keep g's values)
-
-% ---------------- gating ----------------
-    function gateEEG()
-        set(eegKids(isgraphics(eegKids)), 'enable', onoff(get(hEegBox,'value')));
-    end
-
-    function openPeriph()
-        % Parameters for the auxiliary streams live in their own dialog, so
-        % this window stays readable. Starts from the current values.
-        def = struct('eog',g.eog, 'eoglocut',g.eoglocut, 'eoghicut',g.eoghicut, ...
-            'viseog',g.viseog, ...
-            'ppg',g.ppg, 'ppglocut',g.ppglocut, 'ppghicut',g.ppghicut, ...
-            'ppgdetect',g.ppgdetect, 'hrvtime',g.hrvtime, 'hrvfreq',g.hrvfreq, ...
-            'hrvnonlin',g.hrvnonlin, 'visppg',g.visppg, ...
-            'eda',g.eda, 'edalocut',g.edalocut, 'edahicut',g.edahicut, ...
-            'edaphasic',g.edaphasic, 'viscvx',g.viscvx, 'viseda',g.viseda, ...
-            'emg',g.emg, 'emglocut',g.emglocut, 'emghicut',g.emghicut, ...
-            'emgenvelope',g.emgenvelope, 'visemg',g.visemg, ...
-            'imu',g.imu, 'imuhicut',g.imuhicut, 'imumagnitude',g.imumagnitude, 'visimu',g.visimu);
-        if ~isempty(perOpt), def = perOpt; end
-        res = galea_periph_gui(def, hasPPG);
-        if ~isempty(res), perOpt = res; end
-    end
-
-% ---------------- buttons ----------------
-out = [];
-uicontrol(f,'style','pushbutton','string','Help','position',[20 18 80 30], ...
-    'backgroundcolor',c.btn, 'callback','pophelp(''pop_galea_preprocess'');');
-uicontrol(f,'style','pushbutton','string','Cancel','position',[W-200 18 80 30], ...
-    'backgroundcolor',c.btn, 'callback','close(gcbf)');
-uicontrol(f,'style','pushbutton','string','Run','position',[W-105 18 85 30], ...
-    'fontweight','bold','backgroundcolor',c.btn, 'callback',@(~,~) onRun());
-
-uiwait(f);
-g = out;
-
-    function onRun()
-        out = g;
-        out.eeg        = logical(get(hEegBox,'value'));
-        out.trim       = str2double(get(hTrim,'string'));
-        out.resample   = str2double(get(hRes,'string'));
-        out.locut      = str2double(get(hLo,'string'));
-        out.hicut      = str2double(get(hHi,'string'));
-        out.causal     = logical(get(hCaus,'value'));
-        out.polarity   = logical(get(hPol,'value'));
-        out.badchan    = logical(get(hBad,'value'));
-        out.interpchan = logical(get(hInterp,'value'));
-        out.mincorr    = str2double(get(hCorr,'string'));
-        out.maxtol     = str2double(get(hMaxTol,'string')) / 100;   % % -> fraction
-        if logical(get(hAsr,'value'))
-            out.asr    = str2double(get(hAsrTh,'string'));
-        else
-            out.asr    = 0;                    % unchecked = skip the 1st pass
-        end
-        asrModes = get(hAsrMode,'string');
-        out.asrmode    = asrModes{get(hAsrMode,'value')};
-        out.ica        = logical(get(hIca,'value'));
-        out.icaconfirm = true;    % GUI always confirms; command line may disable
-        out.asr2       = str2double(get(hAsr2,'string'));
-        asr2Modes = get(hAsr2Mode,'string');
-        out.asr2mode   = asr2Modes{get(hAsr2Mode,'value')};
-        out.viseeg     = logical(get(hVisE,'value'));
-        % peripheral (PPG/EDA/EMG/IMU) options come from the separate dialog;
-        % until it is opened, keep the values this call was made with.
-        if ~isempty(perOpt)
-            pnames = fieldnames(perOpt);
-            for iP = 1:numel(pnames)
-                out.(pnames{iP}) = perOpt.(pnames{iP});
-            end
-        end
-        close(f);
-    end
-end
-
-% ---------------------------------------------------------------------------
-function s = onoff(tf)
-if tf, s = 'on'; else, s = 'off'; end
-end
-
-% ---------------------------------------------------------------------------
-% ---------------------------------------------------------------------------
-function H = measure_layout(hasPPG, hasEvents, srate) %#ok<INUSD>
-% Mirror of the GUI layout arithmetic in galea_preproc_gui: same rows, same
-% heights, in the same order, so the figure is sized to fit everything before
-% it is created. Keep in sync with the layout code above. (srate is accepted
-% for signature symmetry with galea_preproc_gui; row heights do not vary.)
-if ~isfinite(srate), srate = 0; end  %#ok<NASGU>
-H = 0;  %#ok<NASGU> 
-
-y = 0;
-y = y + 40;                    % top margin
-y = y + 28;                    % 'Trim' title
-if hasEvents
-    y = y + 18 + 22;           % 2 explanation lines + trim-pad row
-else
-    y = y + 22;                % 'no events' line (+ disabled edit)
-end
-y = y + 20 + 1;                % separator
-y = y + 26;                    % 'Process EEG'
-y = y + 26;                    % downsample (+ current-rate label + division popup on same row)
-y = y + 26;                    % bandpass + causal on the same line
-y = y + 24;                    % polarity
-y = y + 28;                    % bad channels
-y = y + 24;                    % correlation threshold
-y = y + 24;                    % max % windows
-y = y + 26;                    % interpolate (own row)
-y = y + 26;                    % ASR 1st pass checkbox + threshold + mode
-y = y + 20 + 16;               % ASR explanation line
-y = y + 22;                    % ICA
-y = y + 22;                    % ASR pass 2
-y = y + 20 + 16 + 16;          % ASR2 explanation lines
-y = y + 20;                    % plot before/after
-y = y + 18 + 1;                % separator
-y = y + 26;                    % peripheral-signals launcher button
-y = y + 56;                    % buttons + bottom margin
-H = y;
-end
 function [EEG, info] = galea_remove_ocular_ic(EEG, confirm)
 % ICA on a 1 Hz high-passed copy (ICA does poorly below 1 Hz), weights
 % transferred back.

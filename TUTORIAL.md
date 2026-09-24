@@ -33,11 +33,13 @@ Select the main file only; the plugin picks up its Aux twin itself.
 
 ### 3. Load a recording
 
-**Menu: Galea** (this opens one window that does everything, top to bottom).
+**Menu: Galea** opens the main window.
+
+![Main window](figures/gui_main.png)
 
 1. Click **Select file...** and choose the main `OpenBCI-RAW-*.txt` file. The
    plugin checks the Aux twin immediately; nothing is imported yet — importing
-   (a slow step) happens when you press **Run**, and a status line under the
+   (a slow step) happens when you press **Next**, and a status line under the
    file name reports progress ("Importing data and converting to EEGLAB
    format..." / "Data imported successfully into EEGLAB").
 2. Choose the montage:
@@ -47,15 +49,12 @@ Select the main file only; the plugin picks up its Aux twin itself.
      Only use this if you actually reconfigured those electrodes as EEG in
      the Galea software *when recording* — otherwise you would be relabelling
      facial EMG as brain data.
-3. Pick the **data type**: **Continuous** (resting state; adds the 2nd-ASR-pass
-   and spectra options) or **ERP** (segmented; adds the epoch window,
-   bad-trial rejection and condition list — the list is filled by a marker
-   scan that runs when ERP is selected).
-4. Choose **Preprocess: Yes/No** (default **Yes**). With Yes, pressing **Run**
-   imports the file first, then opens the preprocessing options window
-   (EEG, PPG, EDA, EMG, IMU) before any cleaning starts.
-
-![Import dialog](figures/gui_import.png)
+3. Pick the **data type**: **Continuous** (resting state) or **ERP**
+   (event-related). This is only the choice; the ERP options (epoch window,
+   bad-trial rejection, condition plot) are set in the next window.
+4. Choose **Preprocess: Yes/No** (default **Yes**). With Yes, **Next** imports
+   the file, then opens the processing parameters before any cleaning starts.
+   With No, the button reads **Import** and loads the raw recording only.
 
 The import splits the multiplexed streams into EEG, EOG, EMG, PPG, EDA and IMU
 (non-EEG streams are kept in `EEG.etc.galea`, nothing is discarded), sets the
@@ -67,16 +66,16 @@ readable event labels when the file comes from the VR driving paradigm.
 
 ### 4. Process
 
-With **Preprocess: Yes** selected in the main window, pressing **Run** imports
-the file and then opens the preprocessing options. Every section below is
-optional and each can be switched off individually.
+**Next** opens the processing parameters (shown here for ERP data). Every
+section is optional; every signal is ticked by default, so untick what you do
+not need. **Run** starts the processing.
 
-![Preprocessing dialog](figures/gui_process.png)
+![Processing parameters](figures/gui_preprocess.png)
 
-- **Trim (all signals)** — removes data before the first event and after the
-  last event, plus a pad. Applies to the EEG *and* all auxiliary signals. `0`
-  keeps everything.
 - **EEG**
+  - *Trim pad* — removes data before the first event and after the last
+    event, plus a pad. Applies to the EEG *and* all auxiliary signals. `0`
+    keeps everything.
   - *Downsample* — a dropdown that lists the detected rate first ("keep
     current rate"), then rate/2 and rate/4 (dividing avoids resampling
     artefacts at non-integer ratios), then common fixed rates.
@@ -98,25 +97,27 @@ optional and each can be switched off individually.
     segments while leaving ocular activity, so ICA can separate the blink
     source cleanly.
   - *ICA, remove the ocular component* — eyes-open tasks only.
-  - *ASR pass after ICA* — optional second, stricter pass; its threshold and
-    mode live in the main window under the **Continuous** data type (default
-    off), since it only applies to continuous data.
-  - Tick **Plot EEG before / after** to see what was done.
-- **Peripheral signals** — click **Set EOG / PPG / EDA / EMG / IMU options...**
-  for the heart-rate, EDA, EMG and IMU branches, each with its own parameters
-  and plot option.
-
-![Peripheral signals dialog](figures/gui_periph.png)
+  - *ASR 2nd pass (after ICA)* — optional stricter pass (default off).
+  - Tick **Plot EEG before / after** to see what was done, and **Plot power
+    spectra** for a 1-70 Hz spectrum of the cleaned recording.
+- **ERP** (ERP data only) — *Epoch window* in seconds around every event
+  marker (default `[-1.5 1.5]`), *Reject bad trials* with a conservative
+  (mean), medium (median) or aggressive (Grubbs) outlier criterion, and
+  *Plot condition ERPs* for one event type (20% trimmed-mean ERP +/- SEM and
+  its single-trial ERP image). No baseline is removed, so the pre- and
+  post-stimulus periods stay comparable.
+- **EOG, PPG, EDA, EMG, IMU** — one section each, with its own parameters and
+  plot option: blink detection, heart rate and HRV through BrainBeats,
+  tonic/phasic EDA, EMG envelope, IMU head-motion magnitude.
 
 Click **Run**.
 
-### 5. Epoch
+### 5. Epoch by hand (optional)
 
-Processing runs on continuous data; epoching and ERPs come from the standard
-EEGLAB menus. Eyeball the cleaned signal first (**Plot > Channel data and
-scroll**), then **Tools > Extract epochs**: cut `[-1.5 1.5]` s around the event
-of interest (e.g. `tire_pop` — the tyre blowout). Leave *baseline removal*
-off, so the pre- and post-stimulus periods stay comparable.
+For ERP data the plugin has already epoched. To cut different epochs, or to
+epoch a dataset processed as continuous, eyeball the cleaned signal first
+(**Plot > Channel data and scroll**), then **Tools > Extract epochs**: e.g.
+`[-1.5 1.5]` s around `tire_pop` (the tyre blowout), baseline removal off.
 
 ### 6. Average and plot
 

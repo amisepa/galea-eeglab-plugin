@@ -48,7 +48,7 @@ EEG = pop_galea_import('montage','default', 'filename',[name ext], 'filepath',fi
 fprintf('\n%d channels, %.1f min, %g Hz\n', EEG.nbchan, EEG.pnts/EEG.srate/60, EEG.srate);
 fprintf('%s\n', strjoin({EEG.chanlocs.labels}, ' '));
 
-% Same thing by clicking:  Galea > Load Galea data...
+% Same thing by clicking:  Galea, then Preprocess: No (the button reads Import).
 
 
 %% 3. Events
@@ -73,7 +73,8 @@ end
 EEG = pop_galea_preprocess(EEG, 'resample',250, 'locut',0.5, 'hicut',30, ...
     'causal',true, 'badchan',true, 'asr',100, 'ica',true);
 
-% Same thing by clicking:  Galea > Preprocess (Cannard 2026)...
+% Same thing by clicking:  Galea, Preprocess: Yes, Next, then Run in the
+% processing parameters window.
 
 
 %% 5. Epoch
