@@ -203,6 +203,8 @@ if g.trim > 0 && hasEvents
     end
 end
 
+badChan = [];      % stay empty when the EEG steps are skipped ('eeg', false)
+icaInfo = [];
 if g.eeg
 % ---- 1. downsample ----
 if g.resample > 0 && g.resample ~= EEG.srate
@@ -533,6 +535,7 @@ if g.hrvnonlin, feats{end+1} = 'nonlinear'; end
 try
     PPG = brainbeats_process(PPG, 'analysis','features', ...
         'heart_signal','ppg', 'heart_channels',{PPG.chanlocs.labels}, ...
+        'eeg', false, ...                          % heart only (else BrainBeats asks for EEG coordinates and returns no HRV)
         'clean_eeg', 0, ...                        % EEG is cleaned above, not here
         'ppg_detect_mode', g.ppgdetect, ...        % pulse-wave valleys (default) or peaks
         'rr_correct', g.rrcorrect, ...
