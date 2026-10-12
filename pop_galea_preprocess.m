@@ -418,7 +418,13 @@ function [EEG, info] = galea_remove_ocular_ic(EEG, confirm)
 fprintf('ICA...\n');
 TMP = pop_eegfiltnew(EEG, 'locutoff', 1);
 dataRank = sum(eig(cov(double(TMP.data'))) > 1e-7);
-TMP = pop_runica(TMP, 'icatype', 'picard', 'mode', 'standard', 'pca', dataRank);
+if exist('picard', 'file')
+    TMP = pop_runica(TMP, 'icatype', 'picard', 'mode', 'standard', 'pca', dataRank);
+else
+    % Picard is an optional EEGLAB extension; pop_runica errors without it
+    fprintf('  Picard extension not installed: using extended Infomax (runica) instead.\n');
+    TMP = pop_runica(TMP, 'icatype', 'runica', 'extended', 1, 'pca', dataRank);
+end
 
 EEG.icaweights  = TMP.icaweights;
 EEG.icasphere   = TMP.icasphere;
